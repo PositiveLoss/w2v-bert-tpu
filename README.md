@@ -160,4 +160,4 @@ Some tests and `examples/inference.py` expect a 16 kHz audio file at `/content/e
 
 ## License
 
-Apache 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Copyright 2026 Yehor Smoliakov. Apache 2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE).
