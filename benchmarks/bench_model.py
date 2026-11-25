@@ -37,7 +37,7 @@ from w2vbert_tpu.compiler import (
     get_compile_metrics,
     reset_compiler,
 )
-from w2vbert_tpu.model import Backend
+from w2vbert_tpu.model import Backend, _find_encoder
 
 # Historical reference measurements (TPU v5e, compiled HF Wav2Vec2BertModel, BF16).
 HISTORICAL_HF_COMPILED_MS: dict[tuple[int, int], float] = {
@@ -166,8 +166,7 @@ def _build_variant_model(
         return model, {"compiled": False, "strategy": "eager"}
     if variant == "hf_compiled":
         if compile_strategy == "layer":
-            encoder: Any = getattr(model, "encoder")
-            for layer in encoder.layers:
+            for layer in _find_encoder(model).layers:
                 layer.compile(backend="tpu", dynamic=False, fullgraph=True)
         else:
             model = compile_tpu(model, dynamic=False, fullgraph=True)

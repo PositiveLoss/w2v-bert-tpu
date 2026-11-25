@@ -4,16 +4,27 @@ Uses ``torch.profiler`` with ``ProfilerActivity.TPU`` (TorchTPU Kineto backend) 
 ``key_averages()`` device time by op and by op category. Raw XPlane/Chrome traces are written to
 a temporary directory and deleted afterwards (they must never be committed).
 
-Example::
+Works with the base model and with fine-tuned models such as ``Wav2Vec2BertForCTC``: the model
+class comes from the checkpoint's ``config.json``. Compiled ops can't be traced back to the
+module they came from, so for a model with a head the script also profiles the encoder alone
+(adapter and head removed) and reports the difference as the adapter + head share of the
+program time. ``--no-encoder-only`` skips that second run.
+
+Examples::
 
     LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.so.4 JAX_PLATFORMS=cpu \\
         python benchmarks/profile_model.py --variants hf_compiled optimized_auto \\
         --configs 5:1 10:16 30:16
+
+    LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.so.4 JAX_PLATFORMS=cpu \\
+        python benchmarks/profile_model.py --model-id speech-uk/w2v-bert-v3 \\
+        --variants optimized_auto --configs 5:1 30:16 120:16 --output-prefix profile_ctc
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import gc
 import json
 import os
@@ -29,6 +40,7 @@ import torch
 
 from w2vbert_tpu._tpu import torch_tpu
 from w2vbert_tpu.compiler import reset_compiler
+from w2vbert_tpu.model import _model_class_for
 
 FRAMES_PER_SECOND = 50
 
@@ -143,7 +155,48 @@ def profile_configuration(
     }
 
 
-def _write_markdown(rows: list[dict[str, Any]], path: Path) -> None:
+def _encoder_only(model: torch.nn.Module) -> torch.nn.Module | None:
+    """Copy of the base ``Wav2Vec2BertModel`` inside ``model`` without its adapter.
+
+    Returns ``None`` when ``model`` is already a plain encoder model (nothing to subtract).
+    """
+    inner = getattr(model, "wav2vec2_bert", None)
+    if inner is None:
+        return None
+    encoder_only: Any = copy.deepcopy(inner)
+    encoder_only.adapter = None
+    encoder_only.intermediate_ffn = None
+    return encoder_only
+
+
+def _head_share_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pair full-model and encoder-only rows and compute the adapter + head share."""
+    encoder_ms = {
+        (r["variant"], r["audio_seconds"], r["batch_size"]): r["program_ms_per_step"]
+        for r in rows
+        if r["part"] == "encoder_only"
+    }
+    shares = []
+    for r in rows:
+        key = (r["variant"], r["audio_seconds"], r["batch_size"])
+        if r["part"] != "full" or key not in encoder_ms:
+            continue
+        full, enc = r["program_ms_per_step"], encoder_ms[key]
+        shares.append(
+            {
+                "variant": r["variant"],
+                "audio_seconds": r["audio_seconds"],
+                "batch_size": r["batch_size"],
+                "full_ms": full,
+                "encoder_only_ms": enc,
+                "adapter_head_ms": round(full - enc, 3),
+                "adapter_head_pct": round(100.0 * (full - enc) / full, 2) if full else 0.0,
+            }
+        )
+    return shares
+
+
+def _write_markdown(rows: list[dict[str, Any]], path: Path, model_id: str) -> None:
     lines = [
         "# TPU v5e profile summary (`torch.profiler`, `ProfilerActivity.TPU`)",
         "",
@@ -152,10 +205,31 @@ def _write_markdown(rows: list[dict[str, Any]], path: Path) -> None:
         "matmuls, `custom-call` = Pallas kernel, `fusion` = XLA elementwise/reduction fusions).",
         "Async `*-start`/`*-done` copies (weight prefetch) overlap compute and are listed apart.",
         "",
+        f"Model: `{model_id}` ({rows[0]['model_class'] if rows else '?'}).",
+        "",
     ]
-    for r in rows:
+    shares = _head_share_rows(rows)
+    if shares:
         lines += [
-            f"## {r['variant']}: {r['audio_seconds']} s (T={r['frames']}), B={r['batch_size']}",
+            "## Adapter + head share",
+            "",
+            "Program time of the full model minus the same model with the adapter and head",
+            "removed (encoder only). Differences of a few percent are within run-to-run noise.",
+            "",
+            "| Variant | Audio | B | Full ms | Encoder-only ms | Adapter + head ms | % |",
+            "|---|---:|---:|---:|---:|---:|---:|",
+        ]
+        for s in shares:
+            lines.append(
+                f"| {s['variant']} | {s['audio_seconds']} s | {s['batch_size']} | {s['full_ms']} | "
+                f"{s['encoder_only_ms']} | {s['adapter_head_ms']} | {s['adapter_head_pct']} |"
+            )
+        lines.append("")
+    for r in rows:
+        part = " (encoder only)" if r["part"] == "encoder_only" else ""
+        lines += [
+            f"## {r['variant']}{part}: {r['audio_seconds']} s (T={r['frames']}), "
+            f"B={r['batch_size']}",
             "",
             f"Program: **{r['program_ms_per_step']} ms/step**; synchronous ops "
             f"{r['sync_op_ms_per_step']} ms ({r['num_sync_ops']} distinct).",
@@ -196,45 +270,61 @@ def main() -> None:
     parser.add_argument("--top", type=int, default=25)
     parser.add_argument("--output-dir", default="benchmarks/results")
     parser.add_argument("--output-prefix", default="profile_summary")
+    parser.add_argument(
+        "--no-encoder-only",
+        action="store_true",
+        help="For models with a head (e.g. CTC), skip the encoder-only comparison run",
+    )
     args = parser.parse_args()
 
     torch_tpu()
     from bench_model import _build_variant_model  # type: ignore[import-not-found]
-    from transformers import Wav2Vec2BertModel
 
-    base = Wav2Vec2BertModel.from_pretrained(args.model_id, local_files_only=True).eval()
+    model_class: Any = _model_class_for(args.model_id, {"local_files_only": True})
+    base = model_class.from_pretrained(args.model_id, local_files_only=True).eval()
+    print(f"Model: {args.model_id} ({model_class.__name__})", flush=True)
     configs = [tuple(int(v) for v in c.split(":")) for c in args.configs]
+
+    parts: list[tuple[str, torch.nn.Module]] = [("full", base)]
+    encoder_only = None if args.no_encoder_only else _encoder_only(base)
+    if encoder_only is not None:
+        parts.append(("encoder_only", encoder_only))
 
     rows: list[dict[str, Any]] = []
     for variant in args.variants:
-        model, _ = _build_variant_model(base, variant)
-        for seconds, batch in configs:
-            row = {"variant": variant}
-            row.update(
-                profile_configuration(
-                    model,
-                    base.config,
-                    batch=batch,
-                    seconds=seconds,
-                    steps=args.steps,
-                    warmup=args.warmup,
-                    top=args.top,
+        for part, source in parts:
+            model, _ = _build_variant_model(source, variant)
+            for seconds, batch in configs:
+                row: dict[str, Any] = {
+                    "variant": variant,
+                    "part": part,
+                    "model_class": model_class.__name__,
+                }
+                row.update(
+                    profile_configuration(
+                        model,
+                        base.config,
+                        batch=batch,
+                        seconds=seconds,
+                        steps=args.steps,
+                        warmup=args.warmup,
+                        top=args.top,
+                    )
                 )
-            )
-            rows.append(row)
-            print(
-                json.dumps({k: row[k] for k in row if k != "top_ops"}),
-                flush=True,
-            )
-        del model
-        gc.collect()
-        reset_compiler(clear_counters=True)
-        torch.accelerator.empty_cache()
+                rows.append(row)
+                print(json.dumps({k: row[k] for k in row if k != "top_ops"}), flush=True)
+            del model
+            gc.collect()
+            reset_compiler(clear_counters=True)
+            torch.accelerator.empty_cache()
+
+    for share in _head_share_rows(rows):
+        print(json.dumps({"adapter_head_share": share}), flush=True)
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"{args.output_prefix}.json").write_text(json.dumps(rows, indent=2) + "\n")
-    _write_markdown(rows, out_dir / f"{args.output_prefix}.md")
+    _write_markdown(rows, out_dir / f"{args.output_prefix}.md", args.model_id)
 
 
 if __name__ == "__main__":
