@@ -1,4 +1,4 @@
-"""TPU-native TorchTPU and Pallas inference for w2v-BERT 2.0 (Wav2Vec2BertModel)."""
+"""TPU-native TorchTPU and Pallas inference for w2v-BERT 2.0 models."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from w2vbert_tpu.compiler import (
     reset_compiler,
 )
 from w2vbert_tpu.convolution import TPUConvolutionModule
+from w2vbert_tpu.ctc import ctc_greedy_decode, ctc_output_lengths
 from w2vbert_tpu.features import extract_features, load_audio
 from w2vbert_tpu.model import (
     Backend,
@@ -48,6 +49,8 @@ __all__ = [
     "__version__",
     "compile_tpu",
     "configure_compiler",
+    "ctc_greedy_decode",
+    "ctc_output_lengths",
     "extract_features",
     "extract_key_lengths",
     "get_compile_metrics",

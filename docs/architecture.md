@@ -1,7 +1,8 @@
 # Architecture
 
 `w2vbert_tpu` runs Hugging Face `facebook/w2v-bert-2.0` (`Wav2Vec2BertModel`, 24 Conformer
-layers, 580,493,120 parameters) on one TPU v5e chip in BF16.
+layers, 580,493,120 parameters) on one TPU v5e chip in BF16. It also runs models built on that
+encoder, such as the fine-tuned speech recognizer `Wav2Vec2BertForCTC`.
 
 It changes the model in place. `optimize(model)` replaces the class of some Hugging Face
 submodules with a subclass that has a faster `forward`. Parameters are not touched, so parameter
@@ -16,14 +17,27 @@ waveform ──► features.extract_features     (on the host; same output as Se
                  24 × encoder layer         (Hugging Face, unchanged except:)
                      self_attn → TPUSelfAttention
                      conv_module            (Hugging Face; TPUConvolutionModule if convolution=True)
+               adapter                      (CTC models only; Hugging Face, unchanged)
+             lm_head                        (CTC models only; Hugging Face, unchanged)
          ──► batching.unpad_output          (optional; remove padding)
+             or ctc.ctc_greedy_decode       (CTC models: logits → token ids)
 ```
+
+`optimize()` looks for the `Wav2Vec2BertEncoder` anywhere inside the model it is given, so it
+works the same on `Wav2Vec2BertModel`, `Wav2Vec2BertForCTC` (encoder at
+`model.wav2vec2_bert.encoder`) or a bare encoder. It only replaces attention whose
+`position_embeddings_type` is `relative_key`. The adapter's attention has no position embeddings,
+so it stays as Hugging Face code.
+
+`load()` reads `architectures` from the checkpoint's `config.json` and builds that class
+(`Wav2Vec2BertForCTC` for a fine-tuned recognizer), falling back to `Wav2Vec2BertModel`.
 
 Source files (`src/w2vbert_tpu/`):
 
 | File | Contents |
 |---|---|
 | `model.py` | `load`, `optimize`, `TPUSelfAttention`, `TPUEncoder` |
+| `ctc.py` | `ctc_output_lengths`, `ctc_greedy_decode` for fine-tuned CTC models |
 | `attention.py` | Plain-PyTorch relative-key attention and the reference implementation |
 | `kernels/relative_attention.py` | Pallas kernel with `[B, H, T, D]` inputs, tile selection |
 | `kernels/fused_qkv_attention.py` | Pallas kernel that reads packed `[B, T, 3·H·D]` Q/K/V (default) |
@@ -32,6 +46,7 @@ Source files (`src/w2vbert_tpu/`):
 | `features.py` | `load_audio`, `extract_features` |
 | `batching.py` | `pad_to_bucket`, `unpad_output`, `prewarm` |
 | `compiler.py` | `configure_compiler`, compile caches, compile counters |
+| `_tpu.py` | `torch_tpu()`: imports TorchTPU and returns `torch.tpu` |
 
 ## Relative-key attention
 

@@ -1,9 +1,11 @@
 # w2v-bert-tpu
 
 Fast inference for [`facebook/w2v-bert-2.0`](https://huggingface.co/facebook/w2v-bert-2.0)
-(Hugging Face `Wav2Vec2BertModel`: 24 Conformer layers, 580M parameters) on a single TPU v5e
-chip. It uses TorchTPU (`torch.compile(backend="tpu")`) and a Pallas kernel for the model's
-relative-position attention.
+(Hugging Face `Wav2Vec2BertModel`: 24 Conformer layers, 580M parameters) and models fine-tuned
+from it, such as the speech recognizer
+[`speech-uk/w2v-bert-v3`](https://huggingface.co/speech-uk/w2v-bert-v3) (`Wav2Vec2BertForCTC`),
+on a single TPU v5e chip. It uses TorchTPU (`torch.compile(backend="tpu")`) and a Pallas kernel
+for the model's relative-position attention.
 
 What you get:
 
@@ -67,6 +69,45 @@ clips the extra padding can cost more than it saves; see
 [`docs/performance.md`](docs/performance.md). `w2vbert_tpu.prewarm(model)` compiles a list of
 buckets ahead of time.
 
+### Fine-tuned speech recognition (CTC)
+
+`load()` builds the class named in the checkpoint's `config.json`, so a fine-tuned CTC model
+loads as `Wav2Vec2BertForCTC` with its head and adapter. Only the encoder is optimized; the
+adapter and head run as Hugging Face code inside the same compiled program.
+
+```python
+import sentencepiece as spm
+from huggingface_hub import hf_hub_download
+
+model = w2vbert_tpu.load("speech-uk/w2v-bert-v3")
+tokenizer = spm.SentencePieceProcessor(
+    model_file=hf_hub_download("speech-uk/w2v-bert-v3", "tokenizer.model")
+)
+
+batch = w2vbert_tpu.pad_to_bucket(inputs["input_features"], inputs["attention_mask"])
+with torch.inference_mode():
+    logits = model(
+        input_features=batch.input_features.to("tpu", torch.bfloat16),
+        attention_mask=batch.attention_mask.to("tpu"),
+    ).logits
+
+# The adapter halves the frame rate, so count valid logit frames from the original mask.
+lengths = w2vbert_tpu.ctc_output_lengths(model.config, inputs["attention_mask"].sum(-1))
+token_ids = w2vbert_tpu.ctc_greedy_decode(logits, lengths, blank_id=0, ignore_ids=[1])
+texts = [tokenizer.decode_ids(ids).strip() for ids in token_ids]
+```
+
+`ctc_greedy_decode` picks the best token per frame, merges repeats and drops blanks. It skips
+padded rows and frames itself, so there is no need for `unpad_output` here. Use your model's
+blank id (`config.pad_token_id`) and any ids to drop (here `1` is `<unk>`).
+
+Checked on CPU in FP32 with `speech-uk/w2v-bert-v3` and the six example clips from the
+[Yehor/w2v-bert-uk-v3](https://huggingface.co/spaces/Yehor/w2v-bert-uk-v3) Space: the optimized
+model gives exactly the same text as unmodified Hugging Face, alone and in a padded batch.
+`extract_features` matches the model's own `asr_features` extractor to within 7e-4.
+
+### Options
+
 If you already have a loaded model, call
 `w2vbert_tpu.optimize(model, compile=True)`. Main options:
 
@@ -82,8 +123,11 @@ If you already have a loaded model, call
 `output_attentions=True` works, but falls back to Hugging Face's eager attention for that call.
 
 There is a runnable script in [`examples/inference.py`](examples/inference.py), and a Colab
-notebook that installs everything and runs sample clips in
+notebook that installs everything and transcribes sample clips with `speech-uk/w2v-bert-v3` in
 [`examples/inference.ipynb`](examples/inference.ipynb).
+
+The performance numbers below are for the base model. A CTC model adds one adapter layer and a
+linear head on top of the same 24-layer encoder, but it hasn't been benchmarked on TPU yet.
 
 ## Performance
 

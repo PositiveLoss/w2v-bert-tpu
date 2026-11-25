@@ -1,4 +1,7 @@
-"""TPU-native model integration for Hugging Face ``Wav2Vec2BertModel`` (w2v-BERT 2.0).
+"""TPU-native model integration for Hugging Face w2v-BERT 2.0 models.
+
+Works with the base ``Wav2Vec2BertModel`` and with models built on it, such as the fine-tuned
+``Wav2Vec2BertForCTC`` speech recognizer.
 
 Uses in-place class swapping on ``Wav2Vec2BertSelfAttention``, ``Wav2Vec2BertConvolutionModule``,
 and ``Wav2Vec2BertEncoder`` so parameter names, ``state_dict()`` keys/values, and ``isinstance``
@@ -456,6 +459,33 @@ def _use_eager_attention_config(model: torch.nn.Module) -> None:
         config._attn_implementation = "eager"
 
 
+def _find_encoder(model: torch.nn.Module) -> Any:
+    """Return the ``Wav2Vec2BertEncoder`` inside ``model`` (or ``model`` itself)."""
+    from transformers.models.wav2vec2_bert.modeling_wav2vec2_bert import Wav2Vec2BertEncoder
+
+    for module in model.modules():
+        if isinstance(module, Wav2Vec2BertEncoder):
+            return module
+    raise ValueError(f"{type(model).__name__} does not contain a Wav2Vec2BertEncoder")
+
+
+# Hub arguments of from_pretrained() that also apply when reading the config.
+_HUB_KWARGS = ("cache_dir", "force_download", "local_files_only", "revision", "subfolder", "token")
+
+
+def _model_class_for(name: str, kwargs: dict[str, Any]) -> type:
+    """Pick the transformers class named in the checkpoint's config (default: the base model)."""
+    import transformers
+
+    hub_kwargs = {k: kwargs[k] for k in _HUB_KWARGS if k in kwargs}
+    config = transformers.AutoConfig.from_pretrained(name, **hub_kwargs)
+    for arch in getattr(config, "architectures", None) or []:
+        cls = getattr(transformers, arch, None)
+        if arch.startswith("Wav2Vec2Bert") and isinstance(cls, type):
+            return cls
+    return transformers.Wav2Vec2BertModel
+
+
 def optimize(
     model: torch.nn.Module,
     *,
@@ -470,10 +500,12 @@ def optimize(
     pallas_tile_size: tuple[int, int] | None = None,
     fused_qkv: bool = True,
 ) -> torch.nn.Module:
-    """Optimize a Hugging Face ``Wav2Vec2BertModel`` in place for TPU inference.
+    """Optimize a Hugging Face w2v-BERT 2.0 model in place for TPU inference.
 
     Args:
-        model: Loaded ``Wav2Vec2BertModel`` (or encoder).
+        model: Loaded ``Wav2Vec2BertModel``, a model built on it (e.g. ``Wav2Vec2BertForCTC``),
+            or a bare ``Wav2Vec2BertEncoder``. Only the encoder's relative-key attention (and
+            optionally its convolutions) are replaced; heads and adapters stay as they are.
         backend: Attention backend: ``"auto"``, ``"pallas"``, ``"native"``, ``"sdpa"``,
             or ``"eager"``.
         num_layers: Optional truncation to the first ``num_layers`` encoder layers.
@@ -496,7 +528,6 @@ def optimize(
     """
     from transformers.models.wav2vec2_bert.modeling_wav2vec2_bert import (
         Wav2Vec2BertConvolutionModule,
-        Wav2Vec2BertEncoder,
         Wav2Vec2BertSelfAttention,
     )
 
@@ -505,7 +536,7 @@ def optimize(
     if compile_strategy not in ("whole", "layer"):
         raise ValueError(f"Unsupported compile_strategy: {compile_strategy}")
 
-    encoder: Any = getattr(model, "encoder", model)
+    encoder = _find_encoder(model)
     config: Any = getattr(model, "config", None)
     if num_layers is not None:
         if not 1 <= num_layers <= len(encoder.layers):
@@ -521,7 +552,7 @@ def optimize(
         config.mask_feature_prob = 0.0
         _use_eager_attention_config(model)
 
-    if backend != "eager" and isinstance(encoder, Wav2Vec2BertEncoder):
+    if backend != "eager":
         if not isinstance(encoder, TPUEncoder):
             encoder.__class__ = _fast_class(type(encoder), TPUEncoder)
 
@@ -606,18 +637,24 @@ def load(
     conv_impl: ConvImpl = "conv1d",
     pallas_tile_size: tuple[int, int] | None = None,
     fused_qkv: bool = True,
+    model_class: type | None = None,
     **kwargs: Any,
 ) -> torch.nn.Module:
-    """Load a pretrained ``Wav2Vec2BertModel`` and optimize it for TPU inference."""
-    from transformers import Wav2Vec2BertModel
+    """Load a pretrained w2v-BERT 2.0 model and optimize it for TPU inference.
 
+    The model class comes from the checkpoint's ``config.json`` (``architectures``): the base
+    ``facebook/w2v-bert-2.0`` loads as ``Wav2Vec2BertModel``, a fine-tuned speech recognizer as
+    ``Wav2Vec2BertForCTC``. Pass ``model_class`` to choose it yourself. Extra keyword arguments
+    go to ``from_pretrained``.
+    """
     if device is not None and torch.device(device).type == "tpu":
         torch_tpu()
         if not torch.accelerator.is_available():
             raise RuntimeError("TPU device requested, but no TPU accelerator is available")
 
     # Typed as nn.Module: type checkers misread PreTrainedModel.to (wrapped with functools.wraps).
-    model = cast(torch.nn.Module, Wav2Vec2BertModel.from_pretrained(name, **kwargs).eval())
+    cls: Any = model_class or _model_class_for(name, kwargs)
+    model = cast(torch.nn.Module, cls.from_pretrained(name, **kwargs).eval())
     if device is not None or dtype is not None:
         model = model.to(device=device, dtype=dtype)
     return optimize(
