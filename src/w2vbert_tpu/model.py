@@ -41,6 +41,12 @@ _FAST_CLASSES: dict[tuple[type, type], type] = {}
 AUTO_PALLAS_MIN_FRAMES = 256
 AUTO_PALLAS_MIN_BATCH = 8
 
+# Adapter attention (CTC models) has no position term. It runs through the relative-key kernel
+# with an all-zero position table, which makes the position term exactly zero. These are the
+# table sizes the kernel was validated with on TPU v5e; with zeros their value doesn't matter.
+ADAPTER_LEFT = 64
+ADAPTER_RIGHT = 8
+
 
 def _auto_prefers_pallas(batch: int, frames: int) -> bool:
     if frames > AUTO_PALLAS_MIN_FRAMES:
@@ -67,6 +73,8 @@ class TPUSelfAttention(torch.nn.Module):
     prepack_qkv: bool = False
     fused_qkv: bool = True
     pallas_tile_size: tuple[int, int] | None = None
+    # Set by optimize() on the adapter's attention: plain attention without a position term.
+    adapter_mode: bool = False
 
     if TYPE_CHECKING:
         # Provided by Wav2Vec2BertSelfAttention once optimize() swaps the class in.
@@ -115,6 +123,9 @@ class TPUSelfAttention(torch.nn.Module):
         return tuple(sig)
 
     def _emb_signature(self) -> tuple[Any, ...]:
+        if self.adapter_mode:
+            w = self.linear_q.weight
+            return ("zero", w.device, w.dtype)
         e = self.distance_embedding.weight
         return (id(e), e._version, e.device, e.dtype)
 
@@ -138,7 +149,20 @@ class TPUSelfAttention(torch.nn.Module):
                     "bias": packed_b,
                 }
 
-        if getattr(self, "position_embeddings_type", None) == "relative_key":
+        if self.adapter_mode:
+            self.__dict__.pop("_emb_cache", None)
+            if self._fused_qkv_supported():
+                from w2vbert_tpu.kernels.fused_qkv_attention import pair_embedding
+
+                w = self.linear_q.weight
+                zeros = torch.zeros(
+                    ADAPTER_LEFT + ADAPTER_RIGHT + 1, self.head_size, device=w.device, dtype=w.dtype
+                )
+                self.__dict__["_emb_cache"] = {
+                    "sig": self._emb_signature(),
+                    "pair": pair_embedding(zeros),
+                }
+        elif getattr(self, "position_embeddings_type", None) == "relative_key":
             emb = self.distance_embedding.weight
             num_buckets = emb.size(0)
             e_pad = ((num_buckets + 127) // 128) * 128 - num_buckets
@@ -151,9 +175,9 @@ class TPUSelfAttention(torch.nn.Module):
             self.__dict__["_emb_cache"] = cache
 
     def _fused_qkv_supported(self) -> bool:
+        relative_key = getattr(self, "position_embeddings_type", None) == "relative_key"
         return (
-            self.fused_qkv
-            and getattr(self, "position_embeddings_type", None) == "relative_key"
+            (self.adapter_mode or (self.fused_qkv and relative_key))
             and self.head_size == 64
             and self.num_heads % 2 == 0
         )
@@ -255,6 +279,9 @@ class TPUSelfAttention(torch.nn.Module):
         output_attentions: bool = False,
         **kwargs: Any,
     ) -> tuple[Tensor, Tensor | None]:
+        if self.adapter_mode:
+            return self._adapter_forward(hidden_states, attention_mask, output_attentions, **kwargs)
+
         key_lengths = kwargs.pop("_tpu_key_lengths", None)
         rel_distance = kwargs.pop("_tpu_rel_distance", None)
         rel_flat_index = kwargs.pop("_tpu_rel_flat_index", None)
@@ -349,6 +376,55 @@ class TPUSelfAttention(torch.nn.Module):
             )
 
         out = out.transpose(1, 2).reshape(batch, frames, self.num_heads * self.head_size)
+        return self.linear_out(out), None
+
+    def _adapter_forward(
+        self,
+        hidden_states: Tensor,
+        attention_mask: Tensor | None,
+        output_attentions: bool,
+        **kwargs: Any,
+    ) -> tuple[Tensor, Tensor | None]:
+        """Adapter attention: the Pallas kernel for long inputs on TPU, Hugging Face otherwise.
+
+        Hugging Face stores the full ``[B, H, T, T]`` score matrix; the kernel never does, so
+        memory grows linearly with the input length.
+        """
+        use_kernel = (
+            self.tpu_backend in ("auto", "pallas")
+            and not output_attentions
+            and not (self.training and self.dropout.p > 0)
+            and self._fused_qkv_supported()
+            and self._resolve_backend(hidden_states) == "pallas"
+        )
+        fused = self._fused_qkv_tensors() if use_kernel else None
+        key_lengths: Tensor | None = None
+        if fused is not None and attention_mask is not None:
+            try:
+                key_lengths = extract_key_lengths(attention_mask, hidden_states.size(1))
+            except ValueError:
+                fused = None  # a mask shape the kernel can't express; use Hugging Face
+        if fused is None:
+            return self._eager(
+                hidden_states,
+                attention_mask=attention_mask,
+                output_attentions=output_attentions,
+                **kwargs,
+            )
+
+        from w2vbert_tpu.kernels.fused_qkv_attention import fused_qkv_attention
+
+        weight, bias, pair = fused
+        qkv = F.linear(hidden_states, weight, bias)
+        out = fused_qkv_attention(
+            qkv,
+            pair.to(qkv.dtype),
+            self.num_heads,
+            ADAPTER_LEFT,
+            ADAPTER_RIGHT,
+            lengths=key_lengths,
+            tile_size=self.pallas_tile_size,
+        )
         return self.linear_out(out), None
 
 
@@ -499,6 +575,7 @@ def optimize(
     conv_impl: ConvImpl = "conv1d",
     pallas_tile_size: tuple[int, int] | None = None,
     fused_qkv: bool = True,
+    adapter: bool = True,
 ) -> torch.nn.Module:
     """Optimize a Hugging Face w2v-BERT 2.0 model in place for TPU inference.
 
@@ -525,8 +602,12 @@ def optimize(
         pallas_tile_size: Optional ``(block_q, block_k)`` override for Pallas attention.
         fused_qkv: On the Pallas path, run Q/K/V as one packed projection that the kernel reads
             in place (head_dim 64, even heads), as in w2v-bert-fast.
+        adapter: For models with an adapter (e.g. ``Wav2Vec2BertForCTC``), run the adapter's
+            attention through the Pallas kernel on long inputs, so its memory grows linearly
+            with length instead of quadratically. Only with ``backend="auto"`` or ``"pallas"``.
     """
     from transformers.models.wav2vec2_bert.modeling_wav2vec2_bert import (
+        Wav2Vec2BertAdapterLayer,
         Wav2Vec2BertConvolutionModule,
         Wav2Vec2BertSelfAttention,
     )
@@ -573,6 +654,27 @@ def optimize(
             attn.prepack()
             attn_count += 1
 
+    adapter_count = 0
+    for module in model.modules():
+        if not isinstance(module, Wav2Vec2BertAdapterLayer):
+            continue
+        attn_module = module.self_attn
+        if adapter and backend in ("auto", "pallas"):
+            if not isinstance(attn_module, TPUSelfAttention):
+                attn_module.__class__ = _fast_class(type(attn_module), TPUSelfAttention)
+            attn = cast(TPUSelfAttention, attn_module)
+            attn.adapter_mode = True
+            attn.tpu_backend = backend
+            attn.pallas_tile_size = pallas_tile_size
+            attn.prepack()
+            adapter_count += 1
+        elif isinstance(attn_module, TPUSelfAttention):
+            # Turning the adapter path off again (optimize() called twice).
+            cast(TPUSelfAttention, attn_module).adapter_mode = False
+            attn_module.__dict__.pop("_emb_cache", None)
+            attn_module.__dict__.pop("_qkv_cache", None)
+            attn_module.tpu_backend = "eager"
+
     conv_count = 0
     if convolution and backend != "eager":
         for module in model.modules():
@@ -584,13 +686,13 @@ def optimize(
                 conv._invalidate_conv_cache()
                 conv_count += 1
 
-    if backend in ("auto", "pallas") and attn_count > 0 and _on_tpu(model):
+    if backend in ("auto", "pallas") and attn_count + adapter_count > 0 and _on_tpu(model):
         # jax_op registration cannot be traced by Dynamo; do it eagerly before any compile.
         from w2vbert_tpu.kernels.fused_qkv_attention import register_fused_ops
         from w2vbert_tpu.kernels.relative_attention import register_pallas_ops
 
         register_pallas_ops()
-        if fused_qkv:
+        if fused_qkv or adapter_count > 0:
             register_fused_ops()
 
     if convolution and conv_impl == "pallas" and conv_count > 0 and _on_tpu(model):
@@ -609,6 +711,7 @@ def optimize(
     model._w2vbert_tpu = {  # type: ignore[attr-defined]
         "backend": backend,
         "attention_modules": attn_count,
+        "adapter_attention_modules": adapter_count,
         "conv_modules": conv_count,
         "num_layers": len(encoder.layers),
         "compile": compile,
@@ -618,6 +721,7 @@ def optimize(
         "native_variant": native_variant,
         "conv_impl": conv_impl,
         "fused_qkv": fused_qkv,
+        "adapter": adapter,
     }
     return model
 
@@ -637,6 +741,7 @@ def load(
     conv_impl: ConvImpl = "conv1d",
     pallas_tile_size: tuple[int, int] | None = None,
     fused_qkv: bool = True,
+    adapter: bool = True,
     model_class: type | None = None,
     **kwargs: Any,
 ) -> torch.nn.Module:
@@ -669,6 +774,7 @@ def load(
         conv_impl=conv_impl,
         pallas_tile_size=pallas_tile_size,
         fused_qkv=fused_qkv,
+        adapter=adapter,
     )
 
 

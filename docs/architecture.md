@@ -17,7 +17,8 @@ waveform ──► features.extract_features     (on the host; same output as Se
                  24 × encoder layer         (Hugging Face, unchanged except:)
                      self_attn → TPUSelfAttention
                      conv_module            (Hugging Face; TPUConvolutionModule if convolution=True)
-               adapter                      (CTC models only; Hugging Face, unchanged)
+               adapter                      (CTC models only; Hugging Face, except:)
+                 self_attn → TPUSelfAttention (adapter_mode: kernel with zero position table)
              lm_head                        (CTC models only; Hugging Face, unchanged)
          ──► batching.unpad_output          (optional; remove padding)
              or ctc.ctc_greedy_decode       (CTC models: logits → token ids)
@@ -26,11 +27,22 @@ waveform ──► features.extract_features     (on the host; same output as Se
 `optimize()` looks for the `Wav2Vec2BertEncoder` anywhere inside the model it is given, so it
 works the same on `Wav2Vec2BertModel`, `Wav2Vec2BertForCTC` (encoder at
 `model.wav2vec2_bert.encoder`) or a bare encoder. It only replaces attention whose
-`position_embeddings_type` is `relative_key`. The adapter's attention has no position embeddings,
-so it stays as Hugging Face code.
+`position_embeddings_type` is `relative_key`, plus the adapter's attention (see below).
 
 `load()` reads `architectures` from the checkpoint's `config.json` and builds that class
 (`Wav2Vec2BertForCTC` for a fine-tuned recognizer), falling back to `Wav2Vec2BertModel`.
+
+### Adapter attention
+
+The adapter's attention has no position term, but Hugging Face still stores the full
+`[B, H, T/2, T/2]` score matrix: 0.27 GiB at 30 s and 4.3 GiB at 120 s (batch 16, BF16), before
+the mask and softmax copies. `optimize()` gives it `TPUSelfAttention` in `adapter_mode`. On TPU,
+when `backend="auto"` would pick Pallas for that length, it runs the packed-Q/K/V kernel with an
+all-zero position table (`ADAPTER_LEFT = 64`, `ADAPTER_RIGHT = 8`, the sizes validated for the
+encoder). With `E = 0` the `q·E` term is exactly zero, so the kernel computes plain attention;
+the kernel's fixed scale 1/8 matches the adapter's head size of 64. Key lengths come from the
+adapter's own mask. Short inputs, other backends, `output_attentions=True`, or `adapter=False`
+use Hugging Face's attention.
 
 Source files (`src/w2vbert_tpu/`):
 

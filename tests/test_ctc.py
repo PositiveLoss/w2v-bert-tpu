@@ -127,3 +127,149 @@ def test_load_picks_class_from_config(tmp_path: Path) -> None:
     assert _model_class_for(str(ctc_dir), {}) is Wav2Vec2BertForCTC
     assert _model_class_for(str(base_dir), {}) is Wav2Vec2BertModel
     assert _model_class_for(str(tmp_path), {"local_files_only": True}) is Wav2Vec2BertModel
+
+
+# --- Adapter attention through the Pallas kernel -------------------------------------------
+
+
+def _kernel_on_cpu(
+    qkv: torch.Tensor,
+    e_pair: torch.Tensor,
+    num_heads: int,
+    left: int,
+    right: int,
+    *,
+    lengths: torch.Tensor | None = None,
+    tile_size: tuple[int, int] | None = None,
+) -> torch.Tensor:
+    """Stand-in for ``fused_qkv_attention`` that runs the same Pallas kernel in interpret mode."""
+    import math
+
+    import jax.numpy as jnp
+    import numpy as np
+
+    from w2vbert_tpu.kernels.fused_qkv_attention import _pallas_call_fused
+    from w2vbert_tpu.kernels.relative_attention import select_tile_size
+
+    batch, frames, _ = qkv.shape
+    block_q, block_k = select_tile_size(frames, tile_size)
+    pad = (-frames) % math.lcm(block_q, block_k)
+    if lengths is None:
+        lengths = torch.full((batch,), frames, dtype=torch.int32)
+    len_tiled = lengths.to(torch.int32)[:, None, None].expand(batch, 8, 128).contiguous()
+    out = _pallas_call_fused(
+        jnp.asarray(torch.nn.functional.pad(qkv, (0, 0, 0, pad)).float().numpy()),
+        jnp.asarray(e_pair.float().numpy()),
+        jnp.asarray(len_tiled.numpy()),
+        num_heads=num_heads,
+        left=left,
+        right=right,
+        block_q=block_q,
+        block_k=block_k,
+        interpret=True,
+    )
+    return torch.from_numpy(np.array(out))[:, :frames].to(qkv.dtype)
+
+
+def _ctc_head64(**overrides: Any) -> Wav2Vec2BertForCTC:
+    """Tiny CTC model with 64-wide heads (what the kernel supports), in FP32."""
+    values: dict[str, Any] = dict(
+        hidden_size=128, output_hidden_size=128, num_attention_heads=2, num_hidden_layers=1
+    )
+    values.update(overrides)
+    torch.manual_seed(0)
+    return Wav2Vec2BertForCTC(_config(**values)).float().eval()
+
+
+def test_zero_position_kernel_is_plain_attention() -> None:
+    from w2vbert_tpu.attention import make_additive_key_mask
+    from w2vbert_tpu.kernels.fused_qkv_attention import pair_embedding
+
+    torch.manual_seed(2)
+    batch, heads, frames = 2, 4, 300
+    q, k, v = (torch.randn(batch, heads, frames, 64) for _ in range(3))
+    lengths = torch.tensor([frames, 111], dtype=torch.int32)
+    mask = make_additive_key_mask(lengths, frames, torch.float32)
+    expected = torch.softmax(q @ k.transpose(-1, -2) / 8.0 + mask, dim=-1) @ v
+    expected = expected.transpose(1, 2).reshape(batch, frames, heads * 64)
+
+    def pack(t: torch.Tensor) -> torch.Tensor:
+        return t.transpose(1, 2).reshape(batch, frames, heads * 64)
+
+    zeros = pair_embedding(torch.zeros(64 + 8 + 1, 64))
+    got = _kernel_on_cpu(
+        torch.cat([pack(q), pack(k), pack(v)], dim=-1), zeros, heads, 64, 8, lengths=lengths
+    )
+    torch.testing.assert_close(got, expected, rtol=1e-4, atol=1e-4)
+
+
+def test_adapter_attention_is_swapped_and_matches_hf_on_cpu() -> None:
+    ref = _tiny_ctc()
+    fast: Any = optimize(copy.deepcopy(ref), backend="auto")
+    attn = fast.wav2vec2_bert.adapter.layers[0].self_attn
+    assert isinstance(attn, TPUSelfAttention) and attn.adapter_mode
+    assert fast._w2vbert_tpu["adapter_attention_modules"] == 1
+    # Not on TPU, so the adapter uses Hugging Face attention: identical results.
+    features, mask = _inputs()
+    with torch.no_grad():
+        torch.testing.assert_close(
+            fast(features, attention_mask=mask).logits, ref(features, attention_mask=mask).logits
+        )
+
+
+@pytest.mark.parametrize("kwargs", [{"adapter": False}, {"backend": "native"}])
+def test_adapter_attention_left_alone(kwargs: dict[str, Any]) -> None:
+    fast: Any = optimize(_tiny_ctc(), **kwargs)
+    assert not isinstance(fast.wav2vec2_bert.adapter.layers[0].self_attn, TPUSelfAttention)
+    assert fast._w2vbert_tpu["adapter_attention_modules"] == 0
+
+
+def test_adapter_attention_can_be_turned_off_again() -> None:
+    ref = _tiny_ctc()
+    fast: Any = optimize(copy.deepcopy(ref), backend="auto")
+    optimize(fast, backend="auto", adapter=False)
+    attn = fast.wav2vec2_bert.adapter.layers[0].self_attn
+    assert not attn.adapter_mode
+    features, mask = _inputs()
+    with torch.no_grad():
+        torch.testing.assert_close(
+            fast(features, attention_mask=mask).logits, ref(features, attention_mask=mask).logits
+        )
+
+
+@pytest.mark.parametrize("padded", [False, True])
+def test_adapter_kernel_path_matches_hf(monkeypatch: pytest.MonkeyPatch, padded: bool) -> None:
+    """Force the adapter onto the kernel path (interpret mode on CPU) and compare logits."""
+    import importlib
+
+    # Not `import ... as`: the kernels package re-exports a function of the same name.
+    fused_module = importlib.import_module("w2vbert_tpu.kernels.fused_qkv_attention")
+
+    ref = _ctc_head64()
+    fast: Any = optimize(copy.deepcopy(ref), backend="auto")
+    calls: list[tuple[int, ...]] = []
+
+    def fake_kernel(qkv: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        calls.append(tuple(qkv.shape))
+        return _kernel_on_cpu(qkv, *args, **kwargs)
+
+    original = TPUSelfAttention._resolve_backend
+
+    def resolve(self: TPUSelfAttention, hidden_states: torch.Tensor) -> Any:
+        return "pallas" if self.adapter_mode else original(self, hidden_states)
+
+    monkeypatch.setattr(fused_module, "fused_qkv_attention", fake_kernel)
+    monkeypatch.setattr(TPUSelfAttention, "_resolve_backend", resolve)
+
+    torch.manual_seed(3)
+    features = torch.randn(2, 61, 16)
+    mask = torch.ones(2, 61, dtype=torch.long)
+    if padded:
+        mask[1, 37:] = 0
+    with torch.no_grad():
+        expected = ref(features, attention_mask=mask).logits
+        got = fast(features, attention_mask=mask).logits
+    assert calls == [(2, 31, 3 * 128)]  # the adapter's attention ran on the kernel path
+    lengths = ctc_output_lengths(ref.config, mask.sum(-1))
+    for row, length in enumerate(lengths.tolist()):
+        torch.testing.assert_close(got[row, :length], expected[row, :length], rtol=1e-4, atol=1e-4)

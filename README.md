@@ -72,8 +72,11 @@ buckets ahead of time.
 ### Fine-tuned speech recognition (CTC)
 
 `load()` builds the class named in the checkpoint's `config.json`, so a fine-tuned CTC model
-loads as `Wav2Vec2BertForCTC` with its head and adapter. Only the encoder is optimized; the
-adapter and head run as Hugging Face code inside the same compiled program.
+loads as `Wav2Vec2BertForCTC` with its head and adapter. The encoder is optimized as usual. The
+adapter's attention (one layer, about 2% of the compute) runs through the same Pallas kernel on
+long inputs. Hugging Face's version stores a `[B, 16, T/2, T/2]` score matrix (4.3 GiB at
+120 s, batch 16); the kernel never does. `adapter=False` keeps Hugging Face's version. The head
+is unchanged.
 
 ```python
 import sentencepiece as spm
@@ -119,6 +122,7 @@ If you already have a loaded model, call
 | `fused_qkv` | `True` | Pallas kernel reads the packed Q/K/V projection directly |
 | `convolution` | `False` | Replace the Conformer conv with a channels-last version (slower on v5e) |
 | `num_layers` | `None` | Keep only the first N encoder layers |
+| `adapter` | `True` | CTC models: run the adapter's attention through the Pallas kernel on long inputs |
 
 `output_attentions=True` works, but falls back to Hugging Face's eager attention for that call.
 
@@ -127,7 +131,16 @@ notebook that installs everything and transcribes sample clips with `speech-uk/w
 [`examples/inference.ipynb`](examples/inference.ipynb).
 
 The performance numbers below are for the base model. A CTC model adds one adapter layer and a
-linear head on top of the same 24-layer encoder, but it hasn't been benchmarked on TPU yet.
+linear head on top of the same 24-layer encoder, but it hasn't been benchmarked on TPU yet. To
+measure it, including the adapter's memory with and without the kernel:
+
+```bash
+python benchmarks/bench_model.py --model-id speech-uk/w2v-bert-v3 \
+    --variants hf_compiled optimized_auto optimized_auto_hf_adapter \
+    --durations 5 30 60 120 --batches 1 16 --output-prefix benchmark_ctc
+python benchmarks/profile_model.py --model-id speech-uk/w2v-bert-v3 \
+    --variants optimized_auto --configs 5:1 30:16 120:16 --output-prefix profile_ctc
+```
 
 ## Performance
 

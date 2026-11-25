@@ -37,7 +37,7 @@ from w2vbert_tpu.compiler import (
     get_compile_metrics,
     reset_compiler,
 )
-from w2vbert_tpu.model import Backend, _find_encoder
+from w2vbert_tpu.model import Backend, _find_encoder, _model_class_for
 
 # Historical reference measurements (TPU v5e, compiled HF Wav2Vec2BertModel, BF16).
 HISTORICAL_HF_COMPILED_MS: dict[tuple[int, int], float] = {
@@ -86,6 +86,11 @@ def analytical_model_flops(config: Any, batch: int, frames: int) -> float:
     - Conformer pointwise1 (d -> 2d) and pointwise2 (d -> d): ``6 * d * d``
     - Conformer causal depthwise conv (kernel K): ``2 * d * K``
     Plus feature projection (``2 * input_dim * d``) per token.
+
+    Models with an adapter (``config.add_adapter``, e.g. CTC) add per adapter layer, on the
+    downsampled sequence: two strided convolutions (``8 * d * d * kernel``), Q/K/V/Out
+    (``8 * d * d``), attention (``4 * frames_out * d``) and a feed-forward block
+    (``4 * d * intermediate``). The CTC head (~0.04%) is not counted.
     """
     d = int(config.hidden_size)
     f = int(config.intermediate_size)
@@ -95,7 +100,20 @@ def analytical_model_flops(config: Any, batch: int, frames: int) -> float:
     in_dim = int(config.feature_projection_input_dim)
     per_layer = 8 * d * f + 8 * d * d + 4 * frames * d + 2 * buckets * d + 6 * d * d + 2 * d * k
     per_token = per_layer * layers + 2 * in_dim * d
-    return float(per_token * batch * frames)
+    total = per_token * batch * frames
+    if getattr(config, "add_adapter", False):
+        d_out = int(config.output_hidden_size)
+        kernel = int(config.adapter_kernel_size)
+        stride = int(config.adapter_stride)
+        if d_out != d:
+            total += 2 * d * d_out * batch * frames  # down-projection before the adapter
+        out_frames = frames
+        for _ in range(int(config.num_adapter_layers)):
+            out_frames = (out_frames + 2 * (kernel // 2) - kernel) // stride + 1
+            per_out = 8 * d_out * d_out * kernel + 8 * d_out * d_out + 4 * out_frames * d_out
+            per_out += 4 * d_out * f
+            total += per_out * batch * out_frames
+    return float(total)
 
 
 def _pkg_ver(name: str) -> str:
@@ -139,7 +157,7 @@ def _estimate_safe_skip(variant: str, batch: int, frames: int, hbm_bytes: int) -
                 f"Estimated dense attention buffer ({dense_bytes / 1024**3:.2f} GiB) "
                 "exceeds safe 15.75 GiB HBM limit"
             )
-    if variant in ("pallas_compiled", "optimized_auto"):
+    if variant in ("pallas_compiled", "optimized_auto", "optimized_auto_hf_adapter"):
         # Linear fit of measured peak HBM (TPU v5e, BF16, extended sweep): ~1.3 GiB weights +
         # workspace plus ~0.1 GiB per 1000 batch*frames (120 s B=8: 6.0 GiB); 1.25x margin.
         estimate_gib = 1.3 + 1.25 * 0.1 * batch * frames / 1000.0
@@ -149,6 +167,12 @@ def _estimate_safe_skip(variant: str, batch: int, frames: int, hbm_bytes: int) -
                 f"{OPTIMIZED_HBM_BUDGET_GIB} GiB budget"
             )
     return None
+
+
+def _main_output(outputs: Any) -> torch.Tensor:
+    """``logits`` for models with a head (e.g. CTC), ``last_hidden_state`` otherwise."""
+    logits = getattr(outputs, "logits", None)
+    return logits if logits is not None else outputs.last_hidden_state
 
 
 def _build_variant_model(
@@ -178,6 +202,8 @@ def _build_variant_model(
         "native_compiled": "native",
         "pallas_compiled": "pallas",
         "optimized_auto": "auto",
+        # CTC models: same as optimized_auto, but the adapter keeps Hugging Face attention.
+        "optimized_auto_hf_adapter": "auto",
     }
     if variant not in backend_map:
         raise ValueError(f"Unknown benchmark variant: {variant}")
@@ -185,6 +211,7 @@ def _build_variant_model(
         model,
         backend=backend_map[variant],
         compile=(compile_strategy == "layer"),
+        adapter=(variant != "optimized_auto_hf_adapter"),
     )
     if compile_strategy == "whole":
         model = compile_tpu(model, dynamic=False, fullgraph=True)
@@ -226,12 +253,15 @@ def benchmark_configuration(
     def _run_once():
         if use_bucketing and effective_frames != frames:
             bucketed = pad_to_bucket(x, mask, frame_buckets=DEFAULT_FRAME_BUCKETS)
-            out = model(
-                input_features=bucketed.input_features,
-                attention_mask=bucketed.attention_mask,
-            ).last_hidden_state
+            out = _main_output(
+                model(
+                    input_features=bucketed.input_features,
+                    attention_mask=bucketed.attention_mask,
+                )
+            )
+            # CTC logits have fewer frames than the input; slicing to `frames` keeps them all.
             return unpad_output(out, batch_size, frames)
-        return model(input_features=x, attention_mask=mask).last_hidden_state
+        return _main_output(model(input_features=x, attention_mask=mask))
 
     torch.accelerator.synchronize()
     torch.accelerator.reset_peak_memory_stats()
@@ -398,6 +428,7 @@ def main() -> None:
             "native_compiled",
             "pallas_compiled",
             "optimized_auto",
+            "optimized_auto_hf_adapter",
         ],
     )
     parser.add_argument("--durations", type=int, nargs="+", default=[5, 10, 30])
@@ -411,10 +442,10 @@ def main() -> None:
     parser.add_argument("--output-prefix", default="benchmark_model")
     args = parser.parse_args()
 
-    from transformers import Wav2Vec2BertModel
-
     meta = _tpu_metadata()
-    base = Wav2Vec2BertModel.from_pretrained(args.model_id, local_files_only=True)
+    # The class named in the checkpoint's config: Wav2Vec2BertModel, Wav2Vec2BertForCTC, ...
+    model_class: Any = _model_class_for(args.model_id, {"local_files_only": True})
+    base = model_class.from_pretrained(args.model_id, local_files_only=True)
     base.config.layerdrop = 0.0
     base.config.mask_time_prob = 0.0
     base.config.mask_feature_prob = 0.0
@@ -423,8 +454,9 @@ def main() -> None:
     meta.update(
         {
             "model_id": args.model_id,
+            "model_class": model_class.__name__,
             "num_parameters": int(sum(p.numel() for p in base.parameters())),
-            "num_layers": int(len(base.encoder.layers)),
+            "num_layers": int(len(_find_encoder(base).layers)),
             "hidden_size": int(base.config.hidden_size),
             "num_attention_heads": int(base.config.num_attention_heads),
             "intermediate_size": int(base.config.intermediate_size),
