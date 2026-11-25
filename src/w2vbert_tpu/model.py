@@ -94,6 +94,40 @@ class TPUSelfAttention(torch.nn.Module):
         self.__dict__.pop("_qkv_cache", None)
         self.__dict__.pop("_emb_cache", None)
 
+    def train(self, mode: bool = True):
+        res = super().train(mode)
+        if not mode:
+            self._refresh_caches()
+        return res
+
+    def _refresh_caches(self) -> None:
+        """Rebuild the packed-weight caches from the current parameters, in place.
+
+        Optimizer steps update the parameters in place, and a compiled model reads the caches
+        without checking them. Copying into the existing tensors (same identity) keeps the
+        compiled program valid and avoids a recompile. Called by ``model.eval()``.
+        """
+        old_qkv = self.__dict__.get("_qkv_cache")
+        old_emb = self.__dict__.get("_emb_cache")
+        with torch.no_grad():
+            self.prepack()
+        for name, old in (("_qkv_cache", old_qkv), ("_emb_cache", old_emb)):
+            new = self.__dict__.get(name)
+            if old is None or new is None:
+                continue
+            for key, value in new.items():
+                prev = old.get(key)
+                if (
+                    isinstance(value, Tensor)
+                    and isinstance(prev, Tensor)
+                    and prev.shape == value.shape
+                    and prev.dtype == value.dtype
+                    and prev.device == value.device
+                ):
+                    with torch.no_grad():
+                        prev.copy_(value)
+                    new[key] = prev
+
     def _apply(self, fn, recurse: bool = True):
         self._invalidate_caches()
         res = super()._apply(fn, recurse=recurse)
@@ -203,6 +237,46 @@ class TPUSelfAttention(torch.nn.Module):
             return None
         return qkv_cache["weight"], qkv_cache["bias"], emb_cache["pair"]
 
+    def _plain_projections(self) -> bool:
+        projections = (self.linear_q, self.linear_k, self.linear_v)
+        if not all(type(m) is torch.nn.Linear for m in projections):
+            return False
+        biases = [m.bias is not None for m in projections]
+        return all(biases) or not any(biases)
+
+    def _fused_trainable(self) -> bool:
+        """The fused kernel has a backward; this module can use it with gradients enabled."""
+        return self._fused_qkv_supported() and self._plain_projections()
+
+    def _fused_qkv_params(self) -> tuple[Tensor, Tensor | None, Tensor] | None:
+        """Packed weight, bias and paired table for the fused kernel.
+
+        Inference reads the caches. With gradients enabled they are built from the live
+        parameters on every call: an optimizer updates the parameters in place each step, and
+        the gradients have to reach them.
+        """
+        if not torch.is_grad_enabled():
+            return self._fused_qkv_tensors()
+        if not self._plain_projections():
+            return None
+        projections = (self.linear_q, self.linear_k, self.linear_v)
+        weight = torch.cat([m.weight for m in projections], dim=0)
+        bias = (
+            torch.cat([m.bias for m in projections], dim=0)
+            if projections[0].bias is not None
+            else None
+        )
+        if self.adapter_mode:
+            emb_cache = self.__dict__.get("_emb_cache")
+            if emb_cache is None or "pair" not in emb_cache:
+                return None
+            pair = emb_cache["pair"]  # constant zeros: nothing to train
+        else:
+            from w2vbert_tpu.kernels.fused_qkv_attention import pair_embedding
+
+            pair = pair_embedding(self.distance_embedding.weight)
+        return weight, bias, pair
+
     def _eager(self, *args, **kwargs):
         from transformers.models.wav2vec2_bert.modeling_wav2vec2_bert import (
             Wav2Vec2BertSelfAttention,
@@ -218,6 +292,15 @@ class TPUSelfAttention(torch.nn.Module):
         return resolve_native_variant(self.native_variant, frames)
 
     def _resolve_backend(self, hidden_states: Tensor) -> Literal["pallas", "native", "sdpa"]:
+        resolved = self._resolve_backend_for_inference(hidden_states)
+        if resolved == "pallas" and torch.is_grad_enabled() and not self._fused_trainable():
+            # Only the fused packed-Q/K/V kernel has a backward; train on the native path.
+            return "native"
+        return resolved
+
+    def _resolve_backend_for_inference(
+        self, hidden_states: Tensor
+    ) -> Literal["pallas", "native", "sdpa"]:
         backend = self.tpu_backend
         if backend == "pallas":
             if hidden_states.device.type != "tpu":
@@ -249,7 +332,8 @@ class TPUSelfAttention(torch.nn.Module):
 
     def _project_qkv(self, hidden_states: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         batch, frames, _ = hidden_states.shape
-        cache = self.__dict__.get("_qkv_cache") if self.prepack_qkv else None
+        use_cache = self.prepack_qkv and not torch.is_grad_enabled()
+        cache = self.__dict__.get("_qkv_cache") if use_cache else None
         if cache is not None and not torch.compiler.is_compiling():
             # Eager only: repack if weights were replaced or modified in place. Under Dynamo the
             # check is skipped because ``Tensor._version`` becomes a data-dependent symbol; the
@@ -319,7 +403,7 @@ class TPUSelfAttention(torch.nn.Module):
                 resolved = "sdpa"
 
         if resolved == "pallas" and self._fused_qkv_supported():
-            fused = self._fused_qkv_tensors()
+            fused = self._fused_qkv_params()
             if fused is not None:
                 # w2v-bert-fast layout: one packed projection read in place by the kernel.
                 from w2vbert_tpu.kernels.fused_qkv_attention import fused_qkv_attention
@@ -397,7 +481,7 @@ class TPUSelfAttention(torch.nn.Module):
             and self._fused_qkv_supported()
             and self._resolve_backend(hidden_states) == "pallas"
         )
-        fused = self._fused_qkv_tensors() if use_kernel else None
+        fused = self._fused_qkv_params() if use_kernel else None
         key_lengths: Tensor | None = None
         if fused is not None and attention_mask is not None:
             try:
@@ -693,7 +777,10 @@ def optimize(
 
         register_pallas_ops()
         if fused_qkv or adapter_count > 0:
+            from w2vbert_tpu.kernels.fused_qkv_backward import register_fused_train_ops
+
             register_fused_ops()
+            register_fused_train_ops()
 
     if convolution and conv_impl == "pallas" and conv_count > 0 and _on_tpu(model):
         from w2vbert_tpu.kernels.causal_conv import register_conv_op

@@ -17,6 +17,10 @@ handled without lane slicing:
 
 The relative bias (far-left/far-right constant columns, Transformer-XL band shift) and the online
 softmax are the same as in :mod:`w2vbert_tpu.kernels.relative_attention`.
+
+For training, the forward can also return the softmax log-sum-exp per row and head
+(``[B, H, 1, T]`` float32), which the backward kernels in
+:mod:`w2vbert_tpu.kernels.fused_qkv_backward` need.
 """
 
 from __future__ import annotations
@@ -60,12 +64,13 @@ def _fused_kernel_body(
     num_k_steps: int,
     masked: bool,
     scale: float,
+    with_lse: bool = False,
 ):
-    if masked:
-        len_ref, o_ref, m_ref, l_ref, acc_ref, qb_ref, edge_ref, bias_ref = rest
-    else:
-        len_ref = None
-        o_ref, m_ref, l_ref, acc_ref, qb_ref, edge_ref, bias_ref = rest
+    rest = list(rest)
+    len_ref = rest.pop(0) if masked else None
+    o_ref = rest.pop(0)
+    lse_ref = rest.pop(0) if with_lse else None
+    m_ref, l_ref, acc_ref, qb_ref, edge_ref, bias_ref = rest
 
     block_q = q_ref.shape[1]
     block_k = k_ref.shape[1]
@@ -153,6 +158,13 @@ def _fused_kernel_body(
         denom = jnp.where(first_head, l_ref[0], l_ref[1])
         inv = jnp.where(denom == 0.0, 0.0, 1.0 / denom)
         o_ref[0] = (acc_ref[...] * inv).astype(o_ref.dtype)
+        if lse_ref is not None:
+            for h in range(2):
+                l_col = l_ref[h]
+                # Rows with no valid key get +inf, so the backward's exp(s - lse) is exactly 0.
+                lse_col = jnp.where(l_col > 0.0, m_ref[h] + jnp.log(l_col), jnp.inf)
+                # Lane-replicated column [bq, 128] -> row [1, bq] (one transpose per query block).
+                lse_ref[0, h] = jnp.transpose(lse_col)[0:1, :]
 
 
 def _pallas_call_fused(
@@ -166,7 +178,8 @@ def _pallas_call_fused(
     block_q: int,
     block_k: int,
     interpret: bool = False,
-) -> jax.Array:
+    with_lse: bool = False,
+) -> Any:
     batch, frames, width = qkv.shape
     pairs = num_heads // 2
     if width != 3 * num_heads * HEAD_DIM or num_heads % 2:
@@ -183,6 +196,7 @@ def _pallas_call_fused(
         num_k_steps=num_k,
         masked=masked,
         scale=1.0 / math.sqrt(HEAD_DIM),
+        with_lse=with_lse,
     )
     in_specs = [
         pl.BlockSpec((1, block_q, _LANES), lambda b, hp, i, j: (b, i, hp)),
@@ -194,13 +208,19 @@ def _pallas_call_fused(
     if masked:
         in_specs.append(pl.BlockSpec((1, 8, 128), lambda b, hp, i, j: (b, 0, 0)))
         args.append(len_tiled)
+    out_spec = pl.BlockSpec((1, block_q, _LANES), lambda b, hp, i, j: (b, i, hp))
+    out_shape: Any = jax.ShapeDtypeStruct((batch, frames, num_heads * HEAD_DIM), qkv.dtype)
+    out_specs: Any = out_spec
+    if with_lse:
+        out_specs = [out_spec, pl.BlockSpec((1, 2, 1, block_q), lambda b, hp, i, j: (b, hp, 0, i))]
+        out_shape = [out_shape, jax.ShapeDtypeStruct((batch, num_heads, 1, frames), jnp.float32)]
     return pl.pallas_call(
         kernel,
         grid_spec=pltpu.PrefetchScalarGridSpec(
             num_scalar_prefetch=0,
             grid=(batch, pairs, num_q, num_k),
             in_specs=in_specs,
-            out_specs=pl.BlockSpec((1, block_q, _LANES), lambda b, hp, i, j: (b, i, hp)),
+            out_specs=out_specs,
             scratch_shapes=[
                 pltpu.VMEM((2, block_q, _LANES), jnp.float32),  # m per head
                 pltpu.VMEM((2, block_q, _LANES), jnp.float32),  # l per head
@@ -210,7 +230,7 @@ def _pallas_call_fused(
                 pltpu.VMEM((2, block_q, block_k), jnp.float32),  # bias tile per head
             ],
         ),
-        out_shape=jax.ShapeDtypeStruct((batch, frames, num_heads * HEAD_DIM), qkv.dtype),
+        out_shape=out_shape,
         compiler_params=pltpu.CompilerParams(
             dimension_semantics=("parallel", "parallel", "parallel", "arbitrary"),
             vmem_limit_bytes=VMEM_LIMIT_BYTES,
@@ -319,6 +339,9 @@ def fused_qkv_attention(
 ) -> Tensor:
     """Relative-key attention on a packed ``[B, T, 3*H*64]`` projection -> ``[B, T, H*64]``.
 
+    Differentiable: when gradients are needed for ``qkv`` or ``e_pair`` it runs the training
+    forward and registers the Pallas backward kernels (:mod:`.fused_qkv_backward`).
+
     Args:
         qkv: Packed projection (q heads, then k heads, then v heads) on ``tpu``.
         e_pair: :func:`pair_embedding` of the distance table, same dtype as ``qkv``.
@@ -328,8 +351,6 @@ def fused_qkv_attention(
         lengths: Optional ``[B]`` int32 valid key lengths.
         tile_size: Optional ``(block_q, block_k)`` override.
     """
-    if qkv.device.type != "tpu":
-        raise ValueError(f"fused_qkv_attention requires TPU tensors, got {qkv.device}")
     batch, frames, _ = qkv.shape
     block_q, block_k = select_tile_size(frames, tile_size)
     tile = math.lcm(block_q, block_k)
@@ -337,6 +358,19 @@ def fused_qkv_attention(
     if pad_t:
         # Padded keys are masked by length; padded query rows are sliced off below.
         qkv = F.pad(qkv, (0, 0, 0, pad_t))
+    if torch.is_grad_enabled() and (qkv.requires_grad or e_pair.requires_grad):
+        # Training: forward that also returns the log-sum-exp, with the backward kernels.
+        from w2vbert_tpu.kernels.fused_qkv_backward import fused_qkv_attention_train
+
+        if lengths is None:
+            lengths = torch.full((batch,), frames, device=qkv.device, dtype=torch.int32)
+        len_tiled = lengths.to(torch.int32)[:, None, None].expand(batch, 8, 128).contiguous()
+        out = fused_qkv_attention_train(
+            qkv, e_pair, len_tiled, num_heads, left, right, block_q, block_k
+        )
+        return out[:, :frames] if pad_t else out
+    if qkv.device.type != "tpu":
+        raise ValueError(f"fused_qkv_attention requires TPU tensors, got {qkv.device}")
     unmasked_op, masked_op = _FUSED_OPS if _FUSED_OPS is not None else register_fused_ops()
     if lengths is None and pad_t == 0:
         out = unmasked_op(qkv, e_pair, num_heads, left, right, block_q, block_k)

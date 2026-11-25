@@ -1,6 +1,6 @@
 # w2v-bert-tpu
 
-Fast inference for [`facebook/w2v-bert-2.0`](https://huggingface.co/facebook/w2v-bert-2.0)
+Fast inference and training for [`facebook/w2v-bert-2.0`](https://huggingface.co/facebook/w2v-bert-2.0)
 (Hugging Face `Wav2Vec2BertModel`: 24 Conformer layers, 580M parameters) and models fine-tuned
 from it, such as the speech recognizer
 [`speech-uk/w2v-bert-v3`](https://huggingface.co/speech-uk/w2v-bert-v3) (`Wav2Vec2BertForCTC`),
@@ -19,6 +19,9 @@ What you get:
   Hugging Face's own BF16 output (max abs error 0.165).
 - **Compiles cleanly** with `fullgraph=True`: no graph breaks, one compile per input shape, no
   device-to-host syncs inside the forward pass.
+- **Trainable.** The Pallas attention kernel has a backward pass, so fine-tuning keeps the
+  kernel's linear memory. Gradients match Hugging Face's. A fine-tuning script for CTC speech
+  recognition is included. Training hasn't been run on a TPU yet, see [Training](#training).
 
 ## Install
 
@@ -141,6 +144,46 @@ python benchmarks/bench_model.py --model-id speech-uk/w2v-bert-v3 \
 python benchmarks/profile_model.py --model-id speech-uk/w2v-bert-v3 \
     --variants optimized_auto --configs 5:1 30:16 120:16 --output-prefix profile_ctc
 ```
+
+## Training
+
+`optimize()` and `load()` work for training as they are: call `model.train()`, compute a loss,
+call `backward()`. For long inputs the attention runs in the Pallas kernels in both directions
+(the backward follows [w2v-bert-fast](https://github.com/Wataru-Nakata/w2v-bert-fast)'s
+design). Short inputs use the plain-PyTorch attention, whose backward XLA compiles. Every
+parameter gets the same gradient as with Hugging Face, the relative-position tables included.
+
+`examples/finetune_ctc.py` fine-tunes a CTC recognizer from JSON Lines manifests
+(`{"audio": "clip.wav", "text": "..."}`):
+
+```bash
+pip install -e ".[audio,train]"
+python examples/finetune_ctc.py --model speech-uk/w2v-bert-v3 \
+    --train train.jsonl --eval dev.jsonl --output-dir runs/uk \
+    --batch-size 8 --max-seconds 20 --steps 20000 --lr 3e-5
+```
+
+It starts from a CTC checkpoint, or from `facebook/w2v-bert-2.0` with `--tokenizer my.model`
+(a new head sized to the SentencePiece vocabulary). It pads batches to fixed shapes, applies
+SpecAugment to the features on the device, computes the CTC loss outside the compiled model,
+and reports WER and CER on `--eval`. Checkpoints load with plain Hugging Face
+(`Wav2Vec2BertForCTC.from_pretrained`).
+
+Things to know:
+
+- Layer drop and Hugging Face's SpecAugment are off after `optimize()`, because neither can be
+  compiled (random Python branches, numpy masks). The script does SpecAugment itself, and its
+  checkpoints keep the original config values.
+- Attention dropout above 0 falls back to Hugging Face's attention in training. The models here
+  use 0.
+- After optimizer steps, call `model.eval()` before inference: it refreshes the packed weights
+  that inference reads. The training path always uses the live parameters.
+- Weights are FP32 by default. `--precision autocast` runs the forward pass in BF16 autocast,
+  which is untested with TorchTPU.
+- **Not yet run on a TPU.** The backward kernels are checked against PyTorch autograd in Pallas
+  interpret mode on CPU, and the script was run on CPU. Mosaic may still reject an operation the
+  interpreter accepts (the backward uses a lane roll with stride `W − 1`), and the speed is
+  unknown.
 
 ## Performance
 

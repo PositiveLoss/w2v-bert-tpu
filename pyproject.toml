@@ -23,6 +23,10 @@ audio = [
     "soundfile>=0.12",
     "torchaudio>=2.4",
 ]
+train = [
+    "sentencepiece>=0.2",
+    "huggingface_hub>=0.20",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.4",

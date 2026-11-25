@@ -83,6 +83,26 @@ lengths and clip sizes.
 padding masks, `num_layers`, `output_attentions=True` (weights equal HF eager) and
 `torch.compile(fullgraph=True)` at three sequence lengths.
 
+## Training gradients
+
+`tests/test_training.py`, on CPU:
+
+- **Pallas backward kernels**, in interpret mode, FP32, against PyTorch autograd of the
+  reference: dq, dk, dv and dE agree to 1e-4 relative error, for T = 250–600, tiles 128–256 and
+  key lengths down to 1. Measured errors were 4e-7 to 2e-5, the same for 512×512 tiles at
+  T = 1100.
+- **Whole model through the kernels:** a `Wav2Vec2BertForCTC` with an adapter, encoder and
+  adapter forced onto the kernel path. Every parameter's gradient of the CTC loss matches Hugging
+  Face's to 1e-4 of its largest value (about 1e-6 in practice), including both layers'
+  `distance_embedding`. `linear_k.bias` gets a gradient that is 0 in exact arithmetic (softmax
+  ignores a per-row constant), so it is checked against an absolute 1e-8.
+- **Native path**, FP64: base model and CTC model, every parameter's gradient equal to Hugging
+  Face's at `rtol=1e-9`.
+- **Stale caches:** the gradient path ignores the prepacked weights, and `model.eval()` refreshes
+  them in place.
+
+None of this has run on a TPU yet.
+
 ## Notes
 
 - Unmodified Hugging Face in BF16 (`backend="eager"`) fails the max_abs ≤ 0.15 criterion on the

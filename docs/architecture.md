@@ -53,6 +53,7 @@ Source files (`src/w2vbert_tpu/`):
 | `attention.py` | Plain-PyTorch relative-key attention and the reference implementation |
 | `kernels/relative_attention.py` | Pallas kernel with `[B, H, T, D]` inputs, tile selection |
 | `kernels/fused_qkv_attention.py` | Pallas kernel that reads packed `[B, T, 3·H·D]` Q/K/V (default) |
+| `kernels/fused_qkv_backward.py` | Backward kernels for training (dQ/dB and dK/dV), autograd wiring |
 | `kernels/causal_conv.py` | Pallas channels-last depthwise convolution (opt-in) |
 | `convolution.py` | `TPUConvolutionModule` (opt-in) |
 | `features.py` | `load_audio`, `extract_features` |
@@ -131,6 +132,38 @@ output is `[B, T, H·64]`, which goes straight into `linear_out` with no transpo
 
 This path needs head size 64 and an even number of heads. Other shapes, or `fused_qkv=False`,
 use the `[B, H, T, D]` kernel.
+
+### Backward pass (`kernels/fused_qkv_backward.py`)
+
+Training uses the packed-Q/K/V kernel, following w2v-bert-fast's FlashAttention-2 backward.
+With `q' = q/√D`, bucket scores `qb = q'·Eᵀ` and the forward's log-sum-exp:
+
+    s_ij = q'_i·k_j + qb[i, clip(j − i, −L, R) + L]     p_ij = exp(s_ij − lse_i)
+    dS = P ∘ (dO·Vᵀ − Δ),  Δ_i = dO_i·O_i
+    dV = Pᵀ·dO   dK = dSᵀ·q'   dq = (dS·K + dB·E)/√D   dE = dBᵀ·q'
+
+`dB[i, n]` collects the score gradients of row `i` in bucket `n`: one entry for each interior
+bucket, row sums for the two clipped ones.
+
+- **Forward for training:** the same kernel with an extra output, the log-sum-exp per row and
+  head, stored as `[B, H, 1, T]` FP32 (one transpose per query block).
+- **dK, dV kernel:** grid `(B, H/2, T/bk, T/bq)` with query blocks inner. It works on transposed
+  `[bk, bq]` tiles, so all matmuls are plain or right-transposed, and the log-sum-exp and Δ are
+  sublane broadcasts of `[1, bq]` rows. Far tiles get their bias as a broadcast row; band tiles
+  build it with the forward's relative shift and transpose it.
+- **dQ, dB kernel:** grid `(B, H/2, T/bq, T/bk)` with key blocks inner, in the forward's
+  orientation. Far tiles add row sums to buckets 0 and `L+R`. Band tiles undo the relative
+  shift: a strided lane roll with stride `W − 1` rotates row `i` by `bq − 1 − i` (mod W; Mosaic
+  takes only non-negative strides), and one dynamic roll moves each interior bucket into its own
+  lane. `dq` gets `dB·E` at the last key block.
+- **Outside the kernels:** Δ is a row sum in XLA, and `dE` is one einsum over `dB` and `q'`. A
+  `torch.autograd.Function` ties the three TorchTPU ops together and returns gradients for the
+  packed projection and the position table.
+
+With gradients enabled, `TPUSelfAttention` builds the packed weight and the paired table from
+the live parameters on every call (the optimizer changes them in place). Pallas paths without a
+backward (the `[B, H, T, D]` kernel) switch to the native path. `model.eval()` refreshes the
+inference caches in place, keeping their identity so a compiled model doesn't recompile.
 
 ### Registering and caching the kernels
 
