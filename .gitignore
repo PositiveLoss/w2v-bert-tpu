@@ -1,0 +1,43 @@
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Model checkpoints, weights, and secrets
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.onnx
+.env
+*.pem
+*.key
+
+# Audio fixtures
+*.wav
+*.flac
+*.mp3
+*.ogg
+
+# Profiling traces and temporary compiler caches
+*.xplane.pb
+*trace*.json
+*trace*.json.gz
+profiler_output/
+tpu_cache/
+tmp/

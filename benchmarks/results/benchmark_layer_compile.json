@@ -1,0 +1,196 @@
+{
+  "metadata": {
+    "accelerator_name": "TPU v5e",
+    "accelerator_version": "TpuVersion.V5E",
+    "physical_chip_count": 1,
+    "hbm_bytes_per_chip": 17179869184,
+    "peak_bf16_flops": 197000000000000.0,
+    "frameworks": {
+      "torch": "2.14.1+cpu",
+      "torch_tpu": "0.3.0",
+      "libtpu": "0.0.50",
+      "transformers": "5.24.1",
+      "jax": "0.11.2"
+    },
+    "model_id": "facebook/w2v-bert-2.0",
+    "num_parameters": 580493120,
+    "num_layers": 24,
+    "hidden_size": 1024,
+    "num_attention_heads": 16,
+    "intermediate_size": 4096,
+    "runs": 20,
+    "warmup": 3,
+    "compile_strategy": "layer",
+    "recompile_limit": 128
+  },
+  "results": [
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 5,
+      "frames": 250,
+      "effective_frames": 250,
+      "batch_size": 1,
+      "input_shape": [
+        1,
+        250,
+        160
+      ],
+      "output_shape": [
+        1,
+        250,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 8.2507,
+      "p50_ms": 4.159,
+      "p95_ms": 5.192,
+      "p99_ms": 5.763,
+      "mean_ms": 4.364,
+      "queued_step_ms": 2.551,
+      "audio_hours_per_hour": 1202.25,
+      "queued_audio_hours_per_hour": 1959.78,
+      "files_per_second": 240.45,
+      "peak_hbm_gib": 1.215,
+      "analytical_tflops_per_call": 0.2969,
+      "mfu_pct": 36.24,
+      "queued_mfu_pct": 59.07,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "layer",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": 4.578
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 5,
+      "frames": 250,
+      "effective_frames": 250,
+      "batch_size": 16,
+      "input_shape": [
+        16,
+        250,
+        160
+      ],
+      "output_shape": [
+        16,
+        250,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 8.5086,
+      "p50_ms": 46.988,
+      "p95_ms": 48.349,
+      "p99_ms": 48.786,
+      "mean_ms": 47.148,
+      "queued_step_ms": 44.78,
+      "audio_hours_per_hour": 1702.56,
+      "queued_audio_hours_per_hour": 1786.51,
+      "files_per_second": 340.51,
+      "peak_hbm_gib": 1.678,
+      "analytical_tflops_per_call": 4.7506,
+      "mfu_pct": 51.32,
+      "queued_mfu_pct": 53.85,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "layer",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": 48.834
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 30,
+      "frames": 1500,
+      "effective_frames": 1500,
+      "batch_size": 1,
+      "input_shape": [
+        1,
+        1500,
+        160
+      ],
+      "output_shape": [
+        1,
+        1500,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 17.0332,
+      "p50_ms": 23.657,
+      "p95_ms": 23.786,
+      "p99_ms": 23.792,
+      "mean_ms": 23.667,
+      "queued_step_ms": 22.019,
+      "audio_hours_per_hour": 1268.14,
+      "queued_audio_hours_per_hour": 1362.48,
+      "files_per_second": 42.27,
+      "peak_hbm_gib": 1.739,
+      "analytical_tflops_per_call": 1.9658,
+      "mfu_pct": 42.18,
+      "queued_mfu_pct": 45.32,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "layer",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": 51.034
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 30,
+      "frames": 1500,
+      "effective_frames": 1500,
+      "batch_size": 16,
+      "input_shape": [
+        16,
+        1500,
+        160
+      ],
+      "output_shape": [
+        16,
+        1500,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 9.1536,
+      "p50_ms": 411.06,
+      "p95_ms": 411.523,
+      "p99_ms": 411.936,
+      "mean_ms": 411.08,
+      "queued_step_ms": 407.238,
+      "audio_hours_per_hour": 1167.71,
+      "queued_audio_hours_per_hour": 1178.67,
+      "files_per_second": 38.92,
+      "peak_hbm_gib": 3.707,
+      "analytical_tflops_per_call": 31.4526,
+      "mfu_pct": 38.84,
+      "queued_mfu_pct": 39.2,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "layer",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": 727.246
+    }
+  ]
+}

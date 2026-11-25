@@ -1,0 +1,433 @@
+{
+  "metadata": {
+    "accelerator_name": "TPU v5e",
+    "accelerator_version": "TpuVersion.V5E",
+    "physical_chip_count": 1,
+    "hbm_bytes_per_chip": 17179869184,
+    "peak_bf16_flops": 197000000000000.0,
+    "frameworks": {
+      "torch": "2.14.1+cpu",
+      "torch_tpu": "0.3.0",
+      "libtpu": "0.0.50",
+      "transformers": "5.24.1",
+      "jax": "0.11.2"
+    },
+    "model_id": "facebook/w2v-bert-2.0",
+    "num_parameters": 580493120,
+    "num_layers": 24,
+    "hidden_size": 1024,
+    "num_attention_heads": 16,
+    "intermediate_size": 4096,
+    "runs": 10,
+    "warmup": 2,
+    "compile_strategy": "whole",
+    "recompile_limit": 128
+  },
+  "results": [
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 20,
+      "frames": 1000,
+      "effective_frames": 1000,
+      "batch_size": 1,
+      "input_shape": [
+        1,
+        1000,
+        160
+      ],
+      "output_shape": [
+        1,
+        1000,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 21.7784,
+      "p50_ms": 14.667,
+      "p95_ms": 15.656,
+      "p99_ms": 15.761,
+      "mean_ms": 14.898,
+      "queued_step_ms": 13.225,
+      "audio_hours_per_hour": 1363.57,
+      "queued_audio_hours_per_hour": 1512.28,
+      "files_per_second": 68.18,
+      "peak_hbm_gib": 1.298,
+      "analytical_tflops_per_call": 1.2614,
+      "mfu_pct": 43.65,
+      "queued_mfu_pct": 48.41,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "whole",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": null
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 20,
+      "frames": 1000,
+      "effective_frames": 1000,
+      "batch_size": 8,
+      "input_shape": [
+        8,
+        1000,
+        160
+      ],
+      "output_shape": [
+        8,
+        1000,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 23.9298,
+      "p50_ms": 116.29,
+      "p95_ms": 116.856,
+      "p99_ms": 116.934,
+      "mean_ms": 116.391,
+      "queued_step_ms": 113.049,
+      "audio_hours_per_hour": 1375.88,
+      "queued_audio_hours_per_hour": 1415.32,
+      "files_per_second": 68.79,
+      "peak_hbm_gib": 1.876,
+      "analytical_tflops_per_call": 10.091,
+      "mfu_pct": 44.05,
+      "queued_mfu_pct": 45.31,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "whole",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": null
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 20,
+      "frames": 1000,
+      "effective_frames": 1000,
+      "batch_size": 16,
+      "input_shape": [
+        16,
+        1000,
+        160
+      ],
+      "output_shape": [
+        16,
+        1000,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 26.4792,
+      "p50_ms": 239.114,
+      "p95_ms": 239.259,
+      "p99_ms": 239.282,
+      "mean_ms": 239.018,
+      "queued_step_ms": 235.299,
+      "audio_hours_per_hour": 1338.28,
+      "queued_audio_hours_per_hour": 1359.97,
+      "files_per_second": 66.91,
+      "peak_hbm_gib": 2.605,
+      "analytical_tflops_per_call": 20.1819,
+      "mfu_pct": 42.84,
+      "queued_mfu_pct": 43.54,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "whole",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": null
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 20,
+      "frames": 1000,
+      "effective_frames": 1000,
+      "batch_size": 32,
+      "input_shape": [
+        32,
+        1000,
+        160
+      ],
+      "output_shape": [
+        32,
+        1000,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 24.8605,
+      "p50_ms": 491.638,
+      "p95_ms": 491.989,
+      "p99_ms": 492.022,
+      "mean_ms": 491.576,
+      "queued_step_ms": 487.871,
+      "audio_hours_per_hour": 1301.77,
+      "queued_audio_hours_per_hour": 1311.82,
+      "files_per_second": 65.09,
+      "peak_hbm_gib": 3.78,
+      "analytical_tflops_per_call": 40.3639,
+      "mfu_pct": 41.68,
+      "queued_mfu_pct": 42.0,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "whole",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": null
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 60,
+      "frames": 3000,
+      "effective_frames": 3000,
+      "batch_size": 1,
+      "input_shape": [
+        1,
+        3000,
+        160
+      ],
+      "output_shape": [
+        1,
+        3000,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 8.0099,
+      "p50_ms": 54.812,
+      "p95_ms": 55.24,
+      "p99_ms": 55.299,
+      "mean_ms": 54.854,
+      "queued_step_ms": 53.024,
+      "audio_hours_per_hour": 1094.65,
+      "queued_audio_hours_per_hour": 1131.56,
+      "files_per_second": 18.24,
+      "peak_hbm_gib": 3.303,
+      "analytical_tflops_per_call": 4.3739,
+      "mfu_pct": 40.51,
+      "queued_mfu_pct": 41.87,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "whole",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": null
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 60,
+      "frames": 3000,
+      "effective_frames": 3000,
+      "batch_size": 8,
+      "input_shape": [
+        8,
+        3000,
+        160
+      ],
+      "output_shape": [
+        8,
+        3000,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 38.8089,
+      "p50_ms": 490.076,
+      "p95_ms": 490.259,
+      "p99_ms": 490.279,
+      "mean_ms": 489.929,
+      "queued_step_ms": 486.35,
+      "audio_hours_per_hour": 979.44,
+      "queued_audio_hours_per_hour": 986.94,
+      "files_per_second": 16.32,
+      "peak_hbm_gib": 4.156,
+      "analytical_tflops_per_call": 34.9915,
+      "mfu_pct": 36.24,
+      "queued_mfu_pct": 36.52,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "whole",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": null
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 60,
+      "frames": 3000,
+      "effective_frames": 3000,
+      "batch_size": 16,
+      "input_shape": [
+        16,
+        3000,
+        160
+      ],
+      "output_shape": [
+        16,
+        3000,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 9.1227,
+      "p50_ms": 979.998,
+      "p95_ms": 980.211,
+      "p99_ms": 980.259,
+      "mean_ms": 979.979,
+      "queued_step_ms": 976.283,
+      "audio_hours_per_hour": 979.59,
+      "queued_audio_hours_per_hour": 983.32,
+      "files_per_second": 16.33,
+      "peak_hbm_gib": 5.469,
+      "analytical_tflops_per_call": 69.983,
+      "mfu_pct": 36.25,
+      "queued_mfu_pct": 36.39,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "whole",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": null
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "skipped",
+      "audio_seconds": 60,
+      "frames": 3000,
+      "effective_frames": 3000,
+      "batch_size": 32,
+      "note": "Estimated peak HBM 27.2 GiB exceeds 14.5 GiB budget"
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 120,
+      "frames": 6000,
+      "effective_frames": 6000,
+      "batch_size": 1,
+      "input_shape": [
+        1,
+        6000,
+        160
+      ],
+      "output_shape": [
+        1,
+        6000,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 25.012,
+      "p50_ms": 149.673,
+      "p95_ms": 150.535,
+      "p99_ms": 150.567,
+      "mean_ms": 149.717,
+      "queued_step_ms": 146.215,
+      "audio_hours_per_hour": 801.75,
+      "queued_audio_hours_per_hour": 820.71,
+      "files_per_second": 6.68,
+      "peak_hbm_gib": 4.681,
+      "analytical_tflops_per_call": 10.5173,
+      "mfu_pct": 35.67,
+      "queued_mfu_pct": 36.51,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "whole",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": null
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 120,
+      "frames": 6000,
+      "effective_frames": 6000,
+      "batch_size": 8,
+      "input_shape": [
+        8,
+        6000,
+        160
+      ],
+      "output_shape": [
+        8,
+        6000,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 30.6664,
+      "p50_ms": 1312.374,
+      "p95_ms": 1312.522,
+      "p99_ms": 1312.537,
+      "mean_ms": 1312.382,
+      "queued_step_ms": 1308.627,
+      "audio_hours_per_hour": 731.5,
+      "queued_audio_hours_per_hour": 733.59,
+      "files_per_second": 6.1,
+      "peak_hbm_gib": 5.992,
+      "analytical_tflops_per_call": 84.1388,
+      "mfu_pct": 32.54,
+      "queued_mfu_pct": 32.64,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "whole",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": null
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "skipped",
+      "audio_seconds": 120,
+      "frames": 6000,
+      "effective_frames": 6000,
+      "batch_size": 16,
+      "note": "Estimated peak HBM 27.2 GiB exceeds 14.5 GiB budget"
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "skipped",
+      "audio_seconds": 120,
+      "frames": 6000,
+      "effective_frames": 6000,
+      "batch_size": 32,
+      "note": "Estimated peak HBM 53.1 GiB exceeds 14.5 GiB budget"
+    }
+  ]
+}

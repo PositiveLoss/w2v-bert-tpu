@@ -1,0 +1,23 @@
+batch,frames,variant,status,first_run_s,p50_ms,p95_ms,mean_ms,peak_hbm_gib,note
+16,250,hf_conv1d,ok,0.4393,0.6498,0.6988,0.6596,0.0699,
+16,250,tpu_conv1d,ok,1.537,0.6892,0.7401,0.6986,0.0654,
+16,250,tpu_shift,ok,1.7202,0.9343,0.9861,0.9385,0.0682,
+16,250,tpu_unfold,error,,,,,,"BackendCompilerFailed: backend='tpu' raised:
+OutOfMemoryError: failed to compile MLIR module -- the XLA compiler failed with: e1000: CompileTimeHbmOom: Ran out of memory on HBM, the total memory required for HLO temporaries (31.39G) exceeds available HBM (15.75G). HLO module: convolution_L81_split2_fwd.
+See https://openxla.org/xla/errors/error_1000 for more details
+
+While executing %submod_0 : [num_users=1] = call_module[target=submod_0](args = (%arg2_1, %arg0_1, %arg1_1, %arg3_1, %arg4_1, %arg5_1, %arg6_1, %arg7_1), kwargs = {})
+Original traceback:
+None
+Use tlparse to see full graph. (https://github.com/pytorch/tlparse?tab=readme-ov-file#tlparse-parse-structured-pt2-logs)
+
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS=""+dynamo""
+"
+16,500,hf_conv1d,ok,0.109,0.9175,0.9853,0.9267,0.168,
+16,500,tpu_conv1d,ok,1.5859,1.0014,1.0282,1.0035,0.1259,
+16,500,tpu_shift,ok,2.3208,1.5692,1.6166,1.5722,0.1294,
+16,500,tpu_unfold,ok,4.0935,5.8751,6.0106,5.8938,1.5581,
+16,1500,hf_conv1d,ok,0.1094,2.0194,2.1026,2.031,1.9711,
+16,1500,tpu_conv1d,ok,2.4847,2.4505,2.4907,2.46,1.7477,
+16,1500,tpu_shift,ok,3.0708,4.0145,4.0711,4.0258,1.7526,
+16,1500,tpu_unfold,ok,17.1876,11.8887,11.9785,11.8872,3.231,

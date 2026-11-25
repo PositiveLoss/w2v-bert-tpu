@@ -1,0 +1,5 @@
+variant,status,audio_seconds,frames,effective_frames,batch_size,first_run_s,p50_ms,p95_ms,p99_ms,queued_step_ms,audio_hours_per_hour,files_per_second,peak_hbm_gib,mfu_pct,compile_count_delta,graph_breaks_delta,historical_hf_compiled_ms,note
+optimized_auto,ok,2,100,100,32,8.2132,40.742,42.188,42.222,39.034,1570.88,785.44,1.518,46.76,1,0,,
+optimized_auto,ok,5,250,250,32,25.9344,97.706,98.196,98.271,94.112,1637.56,327.51,2.024,49.36,1,0,,
+optimized_auto,ok,10,500,500,32,26.5028,207.518,207.847,207.89,203.881,1542.04,154.2,2.754,47.44,1,0,,
+optimized_auto,ok,30,1500,1500,32,32.9539,857.33,857.775,857.999,853.523,1119.76,37.33,4.771,37.25,1,0,,

@@ -1,0 +1,2 @@
+variant,status,audio_seconds,frames,effective_frames,batch_size,first_run_s,p50_ms,p95_ms,p99_ms,queued_step_ms,audio_hours_per_hour,files_per_second,peak_hbm_gib,mfu_pct,compile_count_delta,graph_breaks_delta,historical_hf_compiled_ms,note
+optimized_auto,ok,120,6000,6000,16,28.3263,2573.229,2573.554,2573.599,2569.474,746.14,6.22,6.307,33.2,1,0,,

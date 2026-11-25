@@ -1,0 +1,3 @@
+variant,status,audio_seconds,frames,effective_frames,batch_size,first_run_s,p50_ms,p95_ms,p99_ms,queued_step_ms,audio_hours_per_hour,files_per_second,peak_hbm_gib,mfu_pct,compile_count_delta,graph_breaks_delta,historical_hf_compiled_ms,note
+hf_compiled,ok,2,100,100,1,12.4945,3.204,4.517,5.211,1.683,624.15,312.07,1.173,18.58,1,0,,
+hf_compiled,ok,2,100,100,16,13.162,19.737,20.769,22.171,18.05,1621.3,810.65,1.639,48.26,1,0,,

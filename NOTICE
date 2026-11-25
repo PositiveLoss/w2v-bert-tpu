@@ -1,0 +1,37 @@
+w2v-bert-tpu
+Copyright 2026 w2v-bert-tpu Contributors
+
+This product includes software concepts, architecture patterns, and reference
+derivations informed by the following Apache-2.0 licensed open-source projects:
+
+1. w2v-bert-fast (https://github.com/Wataru-Nakata/w2v-bert-fast)
+   Reference revision: df6e9e4569edef18053008430e667aec3c98eba6
+   License: Apache License 2.0
+   Informed the model class-swap optimization design, QKV projection packing
+   concept, channels-last Conformer convolution formulation, SeamlessM4T
+   feature extraction semantics, and 3-region relative-key attention analysis.
+
+2. Hugging Face Transformers (https://github.com/huggingface/transformers)
+   License: Apache License 2.0
+   Original `Wav2Vec2BertModel`, `Wav2Vec2BertEncoder`,
+   `Wav2Vec2BertSelfAttention`, `Wav2Vec2BertConvolutionModule`, and
+   `SeamlessM4TFeatureExtractor` definitions and numerical reference.
+
+3. TorchTPU (https://github.com/google-pytorch/torch_tpu)
+   Reference revision: 536e7d6451db14a533327f70e5d0458582744718
+   Copyright 2025-2026 Google LLC
+   License: Apache License 2.0
+   Provided TPU runtime integration (`torch.device("tpu")`), `torch.compile(backend="tpu")`,
+   `torch.tpu.pallas.jax_op`, `torch.tpu.pallas.verifier`, and XProf profiler APIs.
+
+4. JAX / Pallas (https://github.com/jax-ml/jax)
+   Reference revision: 59b4bfd116bd4fd254cc8eccfd3a202d59b88c84
+   Copyright 2023-2026 The JAX Authors
+   License: Apache License 2.0
+   Provided Pallas Mosaic TPU lowering and FlashAttention kernel reference patterns.
+
+5. Tokamax (https://github.com/openxla/tokamax)
+   Reference revision: 0c901d55d2ffe2ff25e32a3e176eac0bd94b4ef9
+   Copyright 2025 DeepMind Technologies Limited
+   License: Apache License 2.0
+   Provided TPU Mosaic VMEM/MXU tile alignment and attention kernel design patterns.

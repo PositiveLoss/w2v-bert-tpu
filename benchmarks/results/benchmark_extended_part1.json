@@ -1,0 +1,323 @@
+{
+  "metadata": {
+    "accelerator_name": "TPU v5e",
+    "accelerator_version": "TpuVersion.V5E",
+    "physical_chip_count": 1,
+    "hbm_bytes_per_chip": 17179869184,
+    "peak_bf16_flops": 197000000000000.0,
+    "frameworks": {
+      "torch": "2.14.1+cpu",
+      "torch_tpu": "0.3.0",
+      "libtpu": "0.0.50",
+      "transformers": "5.24.1",
+      "jax": "0.11.2"
+    },
+    "model_id": "facebook/w2v-bert-2.0",
+    "num_parameters": 580493120,
+    "num_layers": 24,
+    "hidden_size": 1024,
+    "num_attention_heads": 16,
+    "intermediate_size": 4096,
+    "runs": 10,
+    "warmup": 2,
+    "compile_strategy": "whole",
+    "recompile_limit": 128,
+    "note": "partial run (stopped to fit time budget); rows complete"
+  },
+  "results": [
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 2,
+      "frames": 100,
+      "effective_frames": 100,
+      "batch_size": 1,
+      "input_shape": [
+        1,
+        100,
+        160
+      ],
+      "output_shape": [
+        1,
+        100,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 20.9654,
+      "p50_ms": 5.808,
+      "p95_ms": 6.638,
+      "p99_ms": 6.963,
+      "mean_ms": 5.937,
+      "queued_step_ms": 4.066,
+      "audio_hours_per_hour": 344.37,
+      "queued_audio_hours_per_hour": 491.84,
+      "files_per_second": 172.19,
+      "peak_hbm_gib": 1.181,
+      "analytical_tflops_per_call": 0.1173,
+      "mfu_pct": 10.25,
+      "queued_mfu_pct": 14.64,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "whole",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": null
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 2,
+      "frames": 100,
+      "effective_frames": 100,
+      "batch_size": 4,
+      "input_shape": [
+        4,
+        100,
+        160
+      ],
+      "output_shape": [
+        4,
+        100,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 23.6686,
+      "p50_ms": 8.557,
+      "p95_ms": 9.399,
+      "p99_ms": 9.704,
+      "mean_ms": 8.622,
+      "queued_step_ms": 4.886,
+      "audio_hours_per_hour": 934.91,
+      "queued_audio_hours_per_hour": 1637.35,
+      "files_per_second": 467.45,
+      "peak_hbm_gib": 1.349,
+      "analytical_tflops_per_call": 0.4692,
+      "mfu_pct": 27.83,
+      "queued_mfu_pct": 48.74,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "whole",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": null
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 2,
+      "frames": 100,
+      "effective_frames": 100,
+      "batch_size": 8,
+      "input_shape": [
+        8,
+        100,
+        160
+      ],
+      "output_shape": [
+        8,
+        100,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 24.5725,
+      "p50_ms": 13.598,
+      "p95_ms": 13.847,
+      "p99_ms": 13.87,
+      "mean_ms": 13.633,
+      "queued_step_ms": 9.386,
+      "audio_hours_per_hour": 1176.62,
+      "queued_audio_hours_per_hour": 1704.71,
+      "files_per_second": 588.31,
+      "peak_hbm_gib": 1.577,
+      "analytical_tflops_per_call": 0.9383,
+      "mfu_pct": 35.03,
+      "queued_mfu_pct": 50.75,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "whole",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": null
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 2,
+      "frames": 100,
+      "effective_frames": 100,
+      "batch_size": 16,
+      "input_shape": [
+        16,
+        100,
+        160
+      ],
+      "output_shape": [
+        16,
+        100,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 25.6563,
+      "p50_ms": 20.443,
+      "p95_ms": 21.834,
+      "p99_ms": 22.177,
+      "mean_ms": 20.593,
+      "queued_step_ms": 17.69,
+      "audio_hours_per_hour": 1565.31,
+      "queued_audio_hours_per_hour": 1808.96,
+      "files_per_second": 782.65,
+      "peak_hbm_gib": 1.888,
+      "analytical_tflops_per_call": 1.8766,
+      "mfu_pct": 46.6,
+      "queued_mfu_pct": 53.85,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "whole",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": null
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 2,
+      "frames": 100,
+      "effective_frames": 100,
+      "batch_size": 32,
+      "input_shape": [
+        32,
+        100,
+        160
+      ],
+      "output_shape": [
+        32,
+        100,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 26.3785,
+      "p50_ms": 41.362,
+      "p95_ms": 42.665,
+      "p99_ms": 42.683,
+      "mean_ms": 41.564,
+      "queued_step_ms": 38.871,
+      "audio_hours_per_hour": 1547.32,
+      "queued_audio_hours_per_hour": 1646.48,
+      "files_per_second": 773.66,
+      "peak_hbm_gib": 2.247,
+      "analytical_tflops_per_call": 3.7533,
+      "mfu_pct": 46.06,
+      "queued_mfu_pct": 49.01,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "whole",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": null
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 5,
+      "frames": 250,
+      "effective_frames": 250,
+      "batch_size": 1,
+      "input_shape": [
+        1,
+        250,
+        160
+      ],
+      "output_shape": [
+        1,
+        250,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 7.3536,
+      "p50_ms": 4.18,
+      "p95_ms": 4.495,
+      "p99_ms": 4.541,
+      "mean_ms": 4.223,
+      "queued_step_ms": 2.63,
+      "audio_hours_per_hour": 1196.14,
+      "queued_audio_hours_per_hour": 1900.88,
+      "files_per_second": 239.23,
+      "peak_hbm_gib": 2.259,
+      "analytical_tflops_per_call": 0.2969,
+      "mfu_pct": 36.06,
+      "queued_mfu_pct": 57.3,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "whole",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": 4.578
+    },
+    {
+      "variant": "optimized_auto",
+      "status": "ok",
+      "audio_seconds": 5,
+      "frames": 250,
+      "effective_frames": 250,
+      "batch_size": 4,
+      "input_shape": [
+        4,
+        250,
+        160
+      ],
+      "output_shape": [
+        4,
+        250,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "device": "tpu:0",
+      "first_run_s": 14.1722,
+      "p50_ms": 12.091,
+      "p95_ms": 12.375,
+      "p99_ms": 12.378,
+      "mean_ms": 12.143,
+      "queued_step_ms": 10.565,
+      "audio_hours_per_hour": 1654.14,
+      "queued_audio_hours_per_hour": 1893.0,
+      "files_per_second": 330.83,
+      "peak_hbm_gib": 2.483,
+      "analytical_tflops_per_call": 1.1876,
+      "mfu_pct": 49.86,
+      "queued_mfu_pct": 57.06,
+      "compile_count_delta": 1,
+      "unique_graphs_delta": 1,
+      "graph_breaks_delta": 0,
+      "compile_meta": {
+        "compiled": true,
+        "strategy": "whole",
+        "backend": "auto"
+      },
+      "historical_hf_compiled_ms": 12.336
+    }
+  ]
+}

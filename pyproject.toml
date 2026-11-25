@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "w2v-bert-tpu"
+version = "0.1.0"
+description = "TPU-native, compiled TorchTPU and Pallas inference for w2v-BERT 2.0 (Wav2Vec2BertModel)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+dependencies = [
+    "torch>=2.4",
+    "transformers>=4.40",
+]
+
+[project.optional-dependencies]
+pallas = [
+    "jax>=0.9.2",
+]
+audio = [
+    "soundfile>=0.12",
+    "torchaudio>=2.4",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+    "pandas>=2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/PositiveLoss/w2v-bert-tpu"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

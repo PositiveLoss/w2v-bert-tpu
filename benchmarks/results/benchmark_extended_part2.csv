@@ -1,0 +1,13 @@
+variant,status,audio_seconds,frames,effective_frames,batch_size,first_run_s,p50_ms,p95_ms,p99_ms,queued_step_ms,audio_hours_per_hour,files_per_second,peak_hbm_gib,mfu_pct,compile_count_delta,graph_breaks_delta,historical_hf_compiled_ms,note
+optimized_auto,ok,20,1000,1000,1,21.7784,14.667,15.656,15.761,13.225,1363.57,68.18,1.298,43.65,1,0,,
+optimized_auto,ok,20,1000,1000,8,23.9298,116.29,116.856,116.934,113.049,1375.88,68.79,1.876,44.05,1,0,,
+optimized_auto,ok,20,1000,1000,16,26.4792,239.114,239.259,239.282,235.299,1338.28,66.91,2.605,42.84,1,0,,
+optimized_auto,ok,20,1000,1000,32,24.8605,491.638,491.989,492.022,487.871,1301.77,65.09,3.78,41.68,1,0,,
+optimized_auto,ok,60,3000,3000,1,8.0099,54.812,55.24,55.299,53.024,1094.65,18.24,3.303,40.51,1,0,,
+optimized_auto,ok,60,3000,3000,8,38.8089,490.076,490.259,490.279,486.35,979.44,16.32,4.156,36.24,1,0,,
+optimized_auto,ok,60,3000,3000,16,9.1227,979.998,980.211,980.259,976.283,979.59,16.33,5.469,36.25,1,0,,
+optimized_auto,skipped,60,3000,3000,32,,,,,,,,,,,,,Estimated peak HBM 27.2 GiB exceeds 14.5 GiB budget
+optimized_auto,ok,120,6000,6000,1,25.012,149.673,150.535,150.567,146.215,801.75,6.68,4.681,35.67,1,0,,
+optimized_auto,ok,120,6000,6000,8,30.6664,1312.374,1312.522,1312.537,1308.627,731.5,6.1,5.992,32.54,1,0,,
+optimized_auto,skipped,120,6000,6000,16,,,,,,,,,,,,,Estimated peak HBM 27.2 GiB exceeds 14.5 GiB budget
+optimized_auto,skipped,120,6000,6000,32,,,,,,,,,,,,,Estimated peak HBM 53.1 GiB exceeds 14.5 GiB budget
