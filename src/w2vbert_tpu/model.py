@@ -7,12 +7,13 @@ relationships remain identical to Hugging Face.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor
 
+from w2vbert_tpu._tpu import torch_tpu
 from w2vbert_tpu.attention import (
     GATHER_MAX_FRAMES,
     NativeAttentionVariant,
@@ -63,6 +64,20 @@ class TPUSelfAttention(torch.nn.Module):
     prepack_qkv: bool = False
     fused_qkv: bool = True
     pallas_tile_size: tuple[int, int] | None = None
+
+    if TYPE_CHECKING:
+        # Provided by Wav2Vec2BertSelfAttention once optimize() swaps the class in.
+        linear_q: torch.nn.Linear
+        linear_k: torch.nn.Linear
+        linear_v: torch.nn.Linear
+        linear_out: torch.nn.Linear
+        distance_embedding: torch.nn.Embedding
+        dropout: torch.nn.Dropout
+        num_heads: int
+        head_size: int
+        position_embeddings_type: str | None
+        left_max_position_embeddings: int
+        right_max_position_embeddings: int
 
     def _invalidate_caches(self) -> None:
         self.__dict__.pop("_qkv_cache", None)
@@ -166,7 +181,9 @@ class TPUSelfAttention(torch.nn.Module):
             Wav2Vec2BertSelfAttention,
         )
 
-        return Wav2Vec2BertSelfAttention.forward(self, *args, **kwargs)
+        return Wav2Vec2BertSelfAttention.forward(
+            cast(Wav2Vec2BertSelfAttention, self), *args, **kwargs
+        )
 
     def _native_variant_for(self, resolved: str, frames: int) -> NativeAttentionVariant:
         if resolved == "sdpa":
@@ -335,6 +352,13 @@ class TPUSelfAttention(torch.nn.Module):
 class TPUEncoder(torch.nn.Module):
     """Encoder wrapper hoisting attention masks and relative distance tables across layers."""
 
+    if TYPE_CHECKING:
+        # Provided by Wav2Vec2BertEncoder once optimize() swaps the class in.
+        config: Any
+        dropout: torch.nn.Dropout
+        embed_positions: torch.nn.Module | None
+        layers: torch.nn.ModuleList
+
     def forward(
         self,
         hidden_states: Tensor,
@@ -348,7 +372,10 @@ class TPUEncoder(torch.nn.Module):
             )
 
             return Wav2Vec2BertEncoder.forward(
-                self, hidden_states, attention_mask=attention_mask, **kwargs
+                cast(Wav2Vec2BertEncoder, self),
+                hidden_states,
+                attention_mask=attention_mask,
+                **kwargs,
             )
 
         conv_attention_mask = attention_mask
@@ -419,13 +446,14 @@ def _use_eager_attention_config(model: torch.nn.Module) -> None:
     fallback used when ``output_attentions=True``: under ``"sdpa"`` (the transformers 5.x
     default) HF's output recorder silently drops attention weights, so they are never returned.
     """
-    if getattr(model.config, "_attn_implementation", None) == "eager":
+    config: Any = getattr(model, "config")
+    if getattr(config, "_attn_implementation", None) == "eager":
         return
     setter = getattr(model, "set_attn_implementation", None)
     if callable(setter):
         setter("eager")
     else:
-        model.config._attn_implementation = "eager"
+        config._attn_implementation = "eager"
 
 
 def optimize(
@@ -477,19 +505,20 @@ def optimize(
     if compile_strategy not in ("whole", "layer"):
         raise ValueError(f"Unsupported compile_strategy: {compile_strategy}")
 
-    encoder = model.encoder if hasattr(model, "encoder") else model
+    encoder: Any = getattr(model, "encoder", model)
+    config: Any = getattr(model, "config", None)
     if num_layers is not None:
         if not 1 <= num_layers <= len(encoder.layers):
             raise ValueError(f"num_layers must be in 1..{len(encoder.layers)}, not {num_layers}")
         encoder.layers = encoder.layers[:num_layers]
-        if hasattr(model, "config"):
-            model.config.num_hidden_layers = num_layers
+        if config is not None:
+            config.num_hidden_layers = num_layers
 
     # Disable training-only stochastic regularizers when inference optimization is applied.
-    if hasattr(model, "config"):
-        model.config.layerdrop = 0.0
-        model.config.mask_time_prob = 0.0
-        model.config.mask_feature_prob = 0.0
+    if config is not None:
+        config.layerdrop = 0.0
+        config.mask_time_prob = 0.0
+        config.mask_feature_prob = 0.0
         _use_eager_attention_config(model)
 
     if backend != "eager" and isinstance(encoder, Wav2Vec2BertEncoder):
@@ -504,12 +533,13 @@ def optimize(
         ):
             if not isinstance(module, TPUSelfAttention):
                 module.__class__ = _fast_class(type(module), TPUSelfAttention)
-            module.tpu_backend = backend
-            module.prepack_qkv = prepack_qkv
-            module.native_variant = native_variant
-            module.pallas_tile_size = pallas_tile_size
-            module.fused_qkv = fused_qkv
-            module.prepack()
+            attn = cast(TPUSelfAttention, module)
+            attn.tpu_backend = backend
+            attn.prepack_qkv = prepack_qkv
+            attn.native_variant = native_variant
+            attn.pallas_tile_size = pallas_tile_size
+            attn.fused_qkv = fused_qkv
+            attn.prepack()
             attn_count += 1
 
     conv_count = 0
@@ -518,8 +548,9 @@ def optimize(
             if isinstance(module, Wav2Vec2BertConvolutionModule):
                 if not isinstance(module, TPUConvolutionModule):
                     module.__class__ = _fast_class(type(module), TPUConvolutionModule)
-                module.conv_impl = conv_impl
-                module._invalidate_conv_cache()
+                conv = cast(TPUConvolutionModule, module)
+                conv.conv_impl = conv_impl
+                conv._invalidate_conv_cache()
                 conv_count += 1
 
     if backend in ("auto", "pallas") and attn_count > 0 and _on_tpu(model):
@@ -581,12 +612,12 @@ def load(
     from transformers import Wav2Vec2BertModel
 
     if device is not None and torch.device(device).type == "tpu":
-        import torch_tpu  # noqa: F401
-
+        torch_tpu()
         if not torch.accelerator.is_available():
             raise RuntimeError("TPU device requested, but no TPU accelerator is available")
 
-    model = Wav2Vec2BertModel.from_pretrained(name, **kwargs).eval()
+    # Typed as nn.Module: type checkers misread PreTrainedModel.to (wrapped with functools.wraps).
+    model = cast(torch.nn.Module, Wav2Vec2BertModel.from_pretrained(name, **kwargs).eval())
     if device is not None or dtype is not None:
         model = model.to(device=device, dtype=dtype)
     return optimize(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import torch
 import torch.nn.functional as F
@@ -61,6 +61,16 @@ class TPUConvolutionModule(torch.nn.Module):
 
     conv_impl: ConvImpl = "conv1d"
 
+    if TYPE_CHECKING:
+        # Provided by Wav2Vec2BertConvolutionModule once optimize() swaps the class in.
+        layer_norm: torch.nn.LayerNorm
+        pointwise_conv1: torch.nn.Conv1d
+        depthwise_conv: torch.nn.Conv1d
+        depthwise_layer_norm: torch.nn.LayerNorm
+        activation: torch.nn.Module
+        pointwise_conv2: torch.nn.Conv1d
+        dropout: torch.nn.Dropout
+
     def _invalidate_conv_cache(self) -> None:
         """Kept for API compatibility; weight views are now taken inside the traced graph."""
         self.__dict__.pop("_conv_cache", None)
@@ -76,7 +86,9 @@ class TPUConvolutionModule(torch.nn.Module):
                 Wav2Vec2BertConvolutionModule,
             )
 
-            return Wav2Vec2BertConvolutionModule.forward(self, hidden_states, attention_mask)
+            return Wav2Vec2BertConvolutionModule.forward(
+                cast(Wav2Vec2BertConvolutionModule, self), hidden_states, attention_mask
+            )
 
         hidden = self.layer_norm(hidden_states)
         if attention_mask is not None:

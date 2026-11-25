@@ -27,6 +27,7 @@ os.environ.setdefault("JAX_PLATFORMS", "cpu")
 
 import torch
 
+from w2vbert_tpu._tpu import torch_tpu
 from w2vbert_tpu.compiler import reset_compiler
 
 FRAMES_PER_SECOND = 50
@@ -197,7 +198,7 @@ def main() -> None:
     parser.add_argument("--output-prefix", default="profile_summary")
     args = parser.parse_args()
 
-    import torch_tpu  # noqa: F401
+    torch_tpu()
     from bench_model import _build_variant_model  # type: ignore[import-not-found]
     from transformers import Wav2Vec2BertModel
 

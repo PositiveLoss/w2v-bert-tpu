@@ -10,6 +10,7 @@ import torch
 from transformers import Wav2Vec2BertConfig
 from transformers.models.wav2vec2_bert.modeling_wav2vec2_bert import Wav2Vec2BertConvolutionModule
 
+from w2vbert_tpu._tpu import torch_tpu
 from w2vbert_tpu.convolution import (
     TPUConvolutionModule,
     causal_depthwise_conv_conv1d,
@@ -72,7 +73,7 @@ def test_tpu_convolution_module_matches_hf_fp64(conv_impl: str, use_mask: bool) 
 def test_tpu_convolution_module_device_parity() -> None:
     if os.environ.get("W2VBERT_RUN_TPU_TESTS", "0") != "1":
         pytest.skip("Set W2VBERT_RUN_TPU_TESTS=1 to run TPU convolution tests")
-    import torch_tpu  # noqa: F401
+    torch_tpu()
 
     if not torch.accelerator.is_available():
         pytest.skip("No TPU accelerator available")

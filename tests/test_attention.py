@@ -9,6 +9,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
+from w2vbert_tpu._tpu import torch_tpu
 from w2vbert_tpu.attention import (
     extract_key_lengths,
     make_additive_key_mask,
@@ -142,10 +143,13 @@ def test_extract_key_lengths_supports_2d_and_4d_masks() -> None:
 
 
 def test_pallas_tpu_v5e_static_lowering() -> None:
+    pytest.importorskip("torch_tpu")
     import jax
     import jax.numpy as jnp
-    import torch_tpu  # noqa: F401
-    from torch_tpu._internal.pallas.verify import findings, fx_verifier
+    from torch_tpu._internal.pallas.verify import (  # pyright: ignore[reportMissingImports]
+        findings,
+        fx_verifier,
+    )
 
     from w2vbert_tpu.kernels.relative_attention import (
         pallas_relative_key_attention_masked_jax,
@@ -264,7 +268,7 @@ def test_pallas_cpu_interpret_fully_masked_row_no_nan() -> None:
 def test_tpu_native_and_pallas_attention_parity() -> None:
     if os.environ.get("W2VBERT_RUN_TPU_TESTS", "0") != "1":
         pytest.skip("Set W2VBERT_RUN_TPU_TESTS=1 to run TPU attention tests")
-    import torch_tpu  # noqa: F401
+    torch_tpu()
 
     from w2vbert_tpu.kernels.relative_attention import pallas_relative_key_attention
 

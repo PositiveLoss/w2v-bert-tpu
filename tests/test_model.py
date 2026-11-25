@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import io
+from typing import Any
 
 import pytest
 import torch
@@ -121,7 +122,7 @@ def test_layer_truncation_and_output_attentions_fallback() -> None:
     original = _tiny_model(layers=4)
     # Keep the transformers default ("sdpa"): optimize() must still return attention weights.
     assert original.config._attn_implementation == "sdpa"
-    short = optimize(copy.deepcopy(original), num_layers=2, backend="native")
+    short: Any = optimize(copy.deepcopy(original), num_layers=2, backend="native")
     reference = copy.deepcopy(original)
     reference.set_attn_implementation("eager")
     features = torch.randn(2, 24, 16, dtype=torch.float64)

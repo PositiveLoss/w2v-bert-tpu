@@ -35,6 +35,7 @@ from jax.experimental import pallas as pl  # noqa: E402
 from jax.experimental.pallas import tpu as pltpu  # noqa: E402
 from torch import Tensor  # noqa: E402
 
+from w2vbert_tpu._tpu import torch_tpu  # noqa: E402
 from w2vbert_tpu.kernels.relative_attention import (  # noqa: E402
     _MASK_VALUE,
     _TRANS_B,
@@ -63,6 +64,7 @@ def _fused_kernel_body(
     if masked:
         len_ref, o_ref, m_ref, l_ref, acc_ref, qb_ref, edge_ref, bias_ref = rest
     else:
+        len_ref = None
         o_ref, m_ref, l_ref, acc_ref, qb_ref, edge_ref, bias_ref = rest
 
     block_q = q_ref.shape[1]
@@ -100,7 +102,8 @@ def _fused_kernel_body(
     is_far_left = (k_start + block_k - 1 - q_start) <= -left
     is_far_right = (k_start - (q_start + block_q - 1)) >= right
     is_band = jnp.logical_not(jnp.logical_or(is_far_left, is_far_right))
-    if masked:
+    col_valid = None
+    if len_ref is not None:
         cols = jax.lax.broadcasted_iota(jnp.int32, (block_q, block_k), 1) + k_start
         col_valid = cols < len_ref[0, 0, 0]
 
@@ -128,12 +131,12 @@ def _fused_kernel_body(
 
         s = jax.lax.dot_general(head_q[h], k, _TRANS_B, preferred_element_type=jnp.float32)
         s = s + bias_ref[h]
-        if masked:
+        if col_valid is not None:
             s = jnp.where(col_valid, s, _MASK_VALUE)
         m_prev = m_ref[h]
         m_next = jnp.maximum(m_prev, jnp.max(s, axis=1)[:, None])
         p = jnp.exp(s - _lane_tile(m_next, block_k))
-        if masked:
+        if col_valid is not None:
             p = jnp.where(col_valid, p, 0.0)
         alpha = jnp.exp(m_prev - m_next)
         l_ref[h] = alpha * l_ref[h] + jnp.sum(p, axis=1)[:, None]
@@ -291,14 +294,13 @@ def register_fused_ops() -> tuple[Any, Any]:
             "fused QKV Pallas ops are not registered; call "
             "w2vbert_tpu.kernels.register_pallas_ops() before torch.compile tracing"
         )
-    import torch_tpu  # noqa: F401
-
+    tpu = torch_tpu()
     tag = _fingerprint()
     _FUSED_OPS = (
-        torch.tpu.pallas.jax_op(
+        tpu.pallas.jax_op(
             f"w2vbert_tpu::fused_qkv_attn_unmasked_{tag}", fused_qkv_attention_unmasked_jax
         ),
-        torch.tpu.pallas.jax_op(
+        tpu.pallas.jax_op(
             f"w2vbert_tpu::fused_qkv_attn_masked_{tag}", fused_qkv_attention_masked_jax
         ),
     )

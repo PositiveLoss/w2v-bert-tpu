@@ -25,6 +25,7 @@ audio = [
 dev = [
     "pytest>=8.0",
     "ruff>=0.4",
+    "pyright>=1.1.400",
     "pandas>=2.0",
 ]
 
@@ -40,6 +41,11 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
+
+[tool.pyright]
+include = ["src", "tests", "benchmarks", "examples", "scripts"]
+pythonVersion = "3.10"
+typeCheckingMode = "standard"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

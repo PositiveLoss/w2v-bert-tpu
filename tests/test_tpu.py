@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+from typing import cast
 
 import pytest
 import torch
 from transformers import Wav2Vec2BertConfig, Wav2Vec2BertModel
 
 from w2vbert_tpu import optimize
+from w2vbert_tpu._tpu import torch_tpu
 from w2vbert_tpu.compiler import configure_compiler, get_compile_metrics, reset_compiler
 from w2vbert_tpu.features import extract_features
 
@@ -22,8 +24,9 @@ def test_configure_compiler_limits() -> None:
 
 
 def test_pallas_jax_op_verifier_contracts() -> None:
-    import torch_tpu  # noqa: F401
-    from torch.tpu.pallas import verifier
+    pytest.importorskip("torch_tpu")
+    tpu = torch_tpu()
+    verifier = tpu.pallas.verifier
 
     from w2vbert_tpu.kernels.relative_attention import _get_tpu_pallas_ops
 
@@ -32,7 +35,7 @@ def test_pallas_jax_op_verifier_contracts() -> None:
     e = torch.randn(128, 64, dtype=torch.bfloat16)
     lengths = torch.full((2, 8, 128), 200, dtype=torch.int32)
 
-    opts = verifier.VerificationOptions(tpu_version=torch.tpu.TpuVersion.V5E)
+    opts = verifier.VerificationOptions(tpu_version=tpu.TpuVersion.V5E)
     rep_u = verifier.verify(
         unmasked_op,
         (q, q, q, e, 64, 8, 128, 128),
@@ -68,10 +71,10 @@ def test_error_handling_for_unsupported_inputs() -> None:
 def test_tpu_device_execution_and_no_graph_breaks() -> None:
     if os.environ.get("W2VBERT_RUN_TPU_TESTS", "0") != "1":
         pytest.skip("Set W2VBERT_RUN_TPU_TESTS=1 to run live TPU integration tests")
-    import torch_tpu  # noqa: F401
-
+    torch_tpu()
     assert torch.accelerator.is_available()
-    assert torch.accelerator.current_accelerator().type == "tpu"
+    accelerator = torch.accelerator.current_accelerator()
+    assert accelerator is not None and accelerator.type == "tpu"
 
     cfg = Wav2Vec2BertConfig(
         hidden_size=128,
@@ -95,7 +98,7 @@ def test_tpu_device_execution_and_no_graph_breaks() -> None:
     configure_compiler(recompile_limit=128, fail_on_recompile_limit=True)
     reset_compiler(clear_counters=True)
     model = optimize(
-        Wav2Vec2BertModel(cfg).eval().to(device="tpu", dtype=torch.bfloat16),
+        cast(torch.nn.Module, Wav2Vec2BertModel(cfg).eval()).to(device="tpu", dtype=torch.bfloat16),
         backend="auto",
         compile=True,
     )

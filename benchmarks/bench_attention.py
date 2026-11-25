@@ -18,6 +18,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from w2vbert_tpu._tpu import torch_tpu
 from w2vbert_tpu.attention import (
     build_distance_indices,
     build_flat_bucket_indices,
@@ -208,7 +209,7 @@ def main() -> None:
     parser.add_argument("--output-prefix", default="bench_attention")
     args = parser.parse_args()
 
-    import torch_tpu  # noqa: F401
+    torch_tpu()
 
     configure_compiler(recompile_limit=128, fail_on_recompile_limit=True)
     register_pallas_ops()

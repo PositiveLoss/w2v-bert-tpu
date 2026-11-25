@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 import torch
@@ -12,6 +13,7 @@ import torch.nn.functional as F
 from transformers import Wav2Vec2BertModel
 
 from w2vbert_tpu import optimize
+from w2vbert_tpu._tpu import torch_tpu
 from w2vbert_tpu.compiler import configure_compiler, get_compile_metrics, reset_compiler
 from w2vbert_tpu.features import extract_features, load_audio
 
@@ -51,13 +53,14 @@ def test_pretrained_real_audio_and_layers_tpu() -> None:
         pytest.skip("Set W2VBERT_RUN_TPU_TESTS=1 to run TPU checkpoint tests")
     if not EXAMPLE_WAV.exists():
         pytest.skip(f"{EXAMPLE_WAV} not found")
-    import torch_tpu  # noqa: F401
+    torch_tpu()
 
     if not torch.accelerator.is_available():
         pytest.skip("No TPU accelerator available")
 
     try:
-        base = Wav2Vec2BertModel.from_pretrained(
+        # Any: type checkers misread PreTrainedModel.to (wrapped with functools.wraps).
+        base: Any = Wav2Vec2BertModel.from_pretrained(
             "facebook/w2v-bert-2.0", local_files_only=True
         ).eval()
     except OSError:
@@ -145,13 +148,14 @@ def test_pretrained_real_audio_and_layers_tpu() -> None:
 def test_pretrained_mixed_length_padded_batch_tpu() -> None:
     if os.environ.get("W2VBERT_RUN_TPU_TESTS", "0") != "1":
         pytest.skip("Set W2VBERT_RUN_TPU_TESTS=1 to run TPU checkpoint tests")
-    import torch_tpu  # noqa: F401
+    torch_tpu()
 
     if not torch.accelerator.is_available():
         pytest.skip("No TPU accelerator available")
 
     try:
-        base = Wav2Vec2BertModel.from_pretrained(
+        # Any: type checkers misread PreTrainedModel.to (wrapped with functools.wraps).
+        base: Any = Wav2Vec2BertModel.from_pretrained(
             "facebook/w2v-bert-2.0", local_files_only=True
         ).eval()
     except OSError:

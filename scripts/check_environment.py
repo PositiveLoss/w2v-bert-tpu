@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import importlib.metadata
 import json
 import os
@@ -79,7 +80,8 @@ def collect_environment() -> dict:
     }
 
     try:
-        import torch_tpu  # noqa: F401
+        importlib.import_module("torch_tpu")
+        tpu = getattr(torch, "tpu")  # added by torch_tpu at import time
 
         tpu_available = torch.accelerator.is_available()
         device_count = torch.accelerator.device_count() if tpu_available else 0
@@ -89,10 +91,10 @@ def collect_environment() -> dict:
             if tpu_available
             else None,
             "device_count": device_count,
-            "pallas_jax_op": hasattr(getattr(torch.tpu, "pallas", None), "jax_op"),
+            "pallas_jax_op": hasattr(getattr(tpu, "pallas", None), "jax_op"),
         }
         if tpu_available:
-            props = torch.tpu.get_device_properties(0)
+            props = tpu.get_device_properties(0)
             free_bytes, total_bytes = torch.accelerator.get_memory_info()
             tpu_info.update(
                 {

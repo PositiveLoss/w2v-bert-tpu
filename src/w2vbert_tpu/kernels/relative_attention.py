@@ -34,6 +34,8 @@ from jax.experimental import pallas as pl  # noqa: E402
 from jax.experimental.pallas import tpu as pltpu  # noqa: E402
 from torch import Tensor  # noqa: E402
 
+from w2vbert_tpu._tpu import torch_tpu  # noqa: E402
+
 # Prevent JAX 0.11/0.12 Cloud TPU libtpu version probes when lowering on host CPU.
 _cloud_tpu_init.running_in_cloud_tpu_vm = False
 
@@ -129,6 +131,7 @@ def _rel_attn_kernel_body(
             bias_scratch_ref,
         ) = rest
     else:
+        len_ref = None
         (
             o_ref,
             m_scratch_ref,
@@ -197,7 +200,8 @@ def _rel_attn_kernel_body(
 
     s = s + bias_scratch_ref[...]
 
-    if masked:
+    col_valid = None
+    if len_ref is not None:
         cols = jax.lax.broadcasted_iota(jnp.int32, (block_q, block_k), 1) + k_start
         valid_len = len_ref[0, 0, 0]
         col_valid = cols < valid_len
@@ -209,7 +213,7 @@ def _rel_attn_kernel_body(
     m_next = jnp.maximum(m_prev, m_curr)
 
     p = jnp.exp(s - _lane_tile(m_next, block_k))
-    if masked:
+    if col_valid is not None:
         p = jnp.where(col_valid, p, 0.0)
     alpha = jnp.exp(m_prev - m_next)
     l_corr = alpha * l_prev
@@ -378,17 +382,16 @@ def register_pallas_ops() -> tuple[Any, Any]:
             "Pallas ops are not registered; call "
             "w2vbert_tpu.kernels.register_pallas_ops() before torch.compile tracing"
         )
-    import torch_tpu  # noqa: F401
-
-    if not hasattr(torch, "tpu") or not hasattr(torch.tpu, "pallas"):
+    tpu = torch_tpu()
+    if not hasattr(tpu, "pallas"):
         raise RuntimeError("torch.tpu.pallas is not available in this environment")
 
     tag = _kernel_fingerprint()
-    unmasked_op = torch.tpu.pallas.jax_op(
+    unmasked_op = tpu.pallas.jax_op(
         f"w2vbert_tpu::rel_key_attn_unmasked_{tag}",
         pallas_relative_key_attention_unmasked_jax,
     )
-    masked_op = torch.tpu.pallas.jax_op(
+    masked_op = tpu.pallas.jax_op(
         f"w2vbert_tpu::rel_key_attn_masked_{tag}",
         pallas_relative_key_attention_masked_jax,
     )

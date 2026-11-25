@@ -10,6 +10,7 @@ import torch
 from transformers import Wav2Vec2BertConfig, Wav2Vec2BertModel
 
 from w2vbert_tpu import optimize
+from w2vbert_tpu._tpu import torch_tpu
 from w2vbert_tpu.batching import (
     DEFAULT_BATCH_BUCKETS,
     DEFAULT_FRAME_BUCKETS,
@@ -96,7 +97,7 @@ def test_padding_invariance_on_valid_positions_cpu(frames: int, expected_bucket:
 def test_padding_invariance_tpu_bf16() -> None:
     if os.environ.get("W2VBERT_RUN_TPU_TESTS", "0") != "1":
         pytest.skip("Set W2VBERT_RUN_TPU_TESTS=1 to run TPU padding invariance tests")
-    import torch_tpu  # noqa: F401
+    torch_tpu()
 
     from w2vbert_tpu import load
 

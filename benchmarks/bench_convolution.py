@@ -20,6 +20,7 @@ import torch
 from transformers import Wav2Vec2BertConfig
 from transformers.models.wav2vec2_bert.modeling_wav2vec2_bert import Wav2Vec2BertConvolutionModule
 
+from w2vbert_tpu._tpu import torch_tpu
 from w2vbert_tpu.compiler import compile_tpu, configure_compiler, reset_compiler
 from w2vbert_tpu.convolution import TPUConvolutionModule
 
@@ -62,7 +63,7 @@ def main() -> None:
     parser.add_argument("--output-prefix", default="bench_convolution")
     args = parser.parse_args()
 
-    import torch_tpu  # noqa: F401
+    torch_tpu()
 
     from w2vbert_tpu.kernels.causal_conv import register_conv_op
 

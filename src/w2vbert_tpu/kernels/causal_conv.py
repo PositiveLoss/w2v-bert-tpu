@@ -24,6 +24,8 @@ from jax.experimental import pallas as pl  # noqa: E402
 from jax.experimental.pallas import tpu as pltpu  # noqa: E402
 from torch import Tensor  # noqa: E402
 
+from w2vbert_tpu._tpu import torch_tpu  # noqa: E402
+
 HALO = 32
 
 
@@ -93,15 +95,14 @@ def register_conv_op() -> Any:
     import importlib.metadata
     from pathlib import Path
 
-    import torch_tpu  # noqa: F401
-
+    tpu = torch_tpu()
     digest = hashlib.sha256(Path(__file__).read_bytes())
     for dist in ("jax", "jaxlib", "libtpu"):
         try:
             digest.update(importlib.metadata.version(dist).encode())
         except importlib.metadata.PackageNotFoundError:
             digest.update(b"missing")
-    _CONV_OP = torch.tpu.pallas.jax_op(
+    _CONV_OP = tpu.pallas.jax_op(
         f"w2vbert_tpu::causal_dwconv_{digest.hexdigest()[:12]}", causal_depthwise_conv_jax
     )
     return _CONV_OP

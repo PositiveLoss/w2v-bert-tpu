@@ -24,12 +24,20 @@ os.environ.setdefault("JAX_PLATFORMS", "cpu")
 import numpy as np
 import torch
 
+from w2vbert_tpu._tpu import torch_tpu
+from w2vbert_tpu.batching import (
+    DEFAULT_FRAME_BUCKETS,
+    pad_to_bucket,
+    select_frame_bucket,
+    unpad_output,
+)
 from w2vbert_tpu.compiler import (
     compile_tpu,
     configure_compiler,
     get_compile_metrics,
     reset_compiler,
 )
+from w2vbert_tpu.model import Backend
 
 # Historical reference measurements (TPU v5e, compiled HF Wav2Vec2BertModel, BF16).
 HISTORICAL_HF_COMPILED_MS: dict[tuple[int, int], float] = {
@@ -98,11 +106,10 @@ def _pkg_ver(name: str) -> str:
 
 
 def _tpu_metadata() -> dict[str, Any]:
-    import torch_tpu  # noqa: F401
-
+    tpu = torch_tpu()
     if not torch.accelerator.is_available():
         raise RuntimeError("No TPU accelerator is available")
-    props = torch.tpu.get_device_properties(0)
+    props = tpu.get_device_properties(0)
     return {
         "accelerator_name": props.name,
         "accelerator_version": str(props.version),
@@ -159,7 +166,8 @@ def _build_variant_model(
         return model, {"compiled": False, "strategy": "eager"}
     if variant == "hf_compiled":
         if compile_strategy == "layer":
-            for layer in model.encoder.layers:
+            encoder: Any = getattr(model, "encoder")
+            for layer in encoder.layers:
                 layer.compile(backend="tpu", dynamic=False, fullgraph=True)
         else:
             model = compile_tpu(model, dynamic=False, fullgraph=True)
@@ -167,7 +175,7 @@ def _build_variant_model(
 
     import w2vbert_tpu
 
-    backend_map = {
+    backend_map: dict[str, Backend] = {
         "native_compiled": "native",
         "pallas_compiled": "pallas",
         "optimized_auto": "auto",
@@ -204,13 +212,6 @@ def benchmark_configuration(
 ) -> dict[str, Any]:
     """Run timed inference for one (variant, batch_size, frames) configuration."""
     if use_bucketing:
-        from w2vbert_tpu.batching import (
-            DEFAULT_FRAME_BUCKETS,
-            pad_to_bucket,
-            select_frame_bucket,
-            unpad_output,
-        )
-
         effective_frames = select_frame_bucket(frames, DEFAULT_FRAME_BUCKETS)
     else:
         effective_frames = frames

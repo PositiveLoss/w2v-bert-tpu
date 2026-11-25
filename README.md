@@ -37,8 +37,9 @@ import w2vbert_tpu
 # Loads in BF16, moves to the TPU, optimizes and compiles.
 model = w2vbert_tpu.load("facebook/w2v-bert-2.0")
 
-audio, sr = w2vbert_tpu.load_audio("speech.wav")                 # mono, resampled to 16 kHz
-inputs = w2vbert_tpu.extract_features(audio, sampling_rate=sr)   # same as SeamlessM4TFeatureExtractor
+audio, sr = w2vbert_tpu.load_audio("speech.wav")  # mono, resampled to 16 kHz
+# Same features as Hugging Face's SeamlessM4TFeatureExtractor.
+inputs = w2vbert_tpu.extract_features(audio, sampling_rate=sr)
 
 with torch.inference_mode():
     hidden = model(
@@ -147,6 +148,7 @@ Only one process can use the TPU at a time. Run tests and benchmarks one after a
 ```bash
 pip install -e ".[audio,dev]"
 ruff check . && ruff format --check .
+pyright
 TORCH_DEVICE_BACKEND_AUTOLOAD=0 pytest          # CPU tests
 W2VBERT_RUN_TPU_TESTS=1 pytest -v               # CPU + TPU tests
 python benchmarks/bench_model.py --variants hf_compiled optimized_auto

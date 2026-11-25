@@ -71,10 +71,11 @@ def main() -> None:
     audio_path = Path(args.audio)
     if audio_path.exists():
         audio, sr = load_audio(audio_path)
+        feats = extract_features(audio, sampling_rate=sr)  # warm-up; also gives the frame count
         t_list = []
         for _ in range(args.runs):
             t0 = time.perf_counter()
-            feats = extract_features(audio, sampling_rate=sr)
+            extract_features(audio, sampling_rate=sr)
             t_list.append((time.perf_counter() - t0) * 1000.0)
         row = {
             "kind": "real_audio",
